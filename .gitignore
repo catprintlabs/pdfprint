@@ -13,5 +13,9 @@
 *.ps
 !testdata/*.ps
 
+# Regenerable smoke-test outputs (pdfprint --output results & gs proof renders)
+testdata/*.out.*
+testdata/*.proof.png
+
 # Generated test fixture (regenerate with `make fixture`)
 /testdata/hello.pdf

@@ -82,7 +82,32 @@ pdfprint --ppd hp.ppd --dry-run job.pdf
 pdfprint --ppd hp.ppd --device pxlcolor --output out.pcl job.pdf
 ```
 
-Read the PDF from stdin with `-` as the input path.
+Read the PDF from stdin with `-` as the input path. Write the raw stream to
+stdout with `--output -`, which is how you print from macOS/Linux (below).
+
+### Printing from macOS/Linux (CUPS, raw)
+
+The `--printer` flag targets the *Windows* spooler. On macOS/Linux, emit the raw
+stream to stdout and pipe it into `lp -o raw`, which sends the bytes straight to
+the printer — bypassing the CUPS driver so nothing rescales:
+
+```sh
+# Find the exact CUPS queue name:
+lpstat -e
+
+# Print the no-scaling test page (8.5x14 Legal) 1:1 — PostScript path:
+pdfprint --scale none --device ps2write --page-size Legal --output - testdata/legal_ruler.pdf \
+  | lp -d <queue-name> -o raw -t "pdfprint no-scaling test"
+
+# Same page via the PCL-XL path (compare PCL vs PS on the same printer):
+pdfprint --scale none --device pxlmono --page-size Legal --output - testdata/legal_ruler.pdf \
+  | lp -d <queue-name> -o raw -t "pdfprint no-scaling test (PCL-XL)"
+```
+
+Both were verified end-to-end on a Xerox VersaLink C620 (Legal loaded): ticks
+measure exactly 1.00 in and tick *N* lands *N* inches from the center crosshair —
+i.e. true 1:1, no scaling. Confirm the queue reached the printer with
+`lpstat -o <queue-name>` (empty queue = job sent).
 
 Key flags: `--list-printers`, `--page-size`, `--scale none|fit`, `--copies N`,
 `--duplex none|long|short`, `--color auto|color|mono`, `--device`, `--gs <path>`
@@ -98,6 +123,43 @@ Key flags: `--list-printers`, `--page-size`, `--scale none|fit`, `--copies N`,
 
 If `--device` is omitted, it's inferred from the PPD (Foomatic command line,
 then `cupsFilter` hints, then the model name).
+
+## Cloning the repo (Git LFS required)
+
+The PDF test fixtures under `testdata/` (larger sample tickets can be several MB)
+are stored with **[Git LFS](https://git-lfs.com)**, not directly in Git history.
+You must have Git LFS installed **before you clone**, or you'll get tiny text
+pointer files instead of the actual PDFs.
+
+Install it once per machine:
+
+```sh
+# macOS (Homebrew):
+brew install git-lfs
+
+# Windows: install "Git for Windows" (git-lfs is bundled), or standalone:
+#   winget install GitHub.GitLFS      (or download from https://git-lfs.com)
+
+# then, once, per user account (all OSes):
+git lfs install
+```
+
+Then clone normally — LFS files download automatically:
+
+```sh
+git clone <repo-url>
+```
+
+Already cloned *before* installing LFS? Fix it in place:
+
+```sh
+git lfs install
+git lfs pull        # replace the pointer files with the real PDFs
+```
+
+`.gitattributes` declares which files use LFS (`testdata/*.pdf`). To add more
+large binary fixtures, `git lfs track "<glob>"` and commit the updated
+`.gitattributes`.
 
 ## Build
 
@@ -122,6 +184,10 @@ Added for real-printer testing: Ghostscript auto-detection on Windows,
 `--list-printers`, `--page-size` (PPD or built-in table), and guaranteed
 no-scaling (`-dDEVICEWIDTHPOINTS/HEIGHTPOINTS` + `-dFIXEDMEDIA`), verified by
 rasterizing output to exactly 5100×8400 px (8.5×14" @ 600 dpi).
+
+Printed the Legal no-scaling test page (`testdata/legal_ruler.pdf`) on a real
+Xerox VersaLink C620 via `lp -o raw`, both PostScript (`ps2write`) and PCL-XL
+(`pxlmono`) paths: measured 1:1, no scaling. See "Printing from macOS/Linux".
 
 ### Not yet done / next
 
