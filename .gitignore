@@ -1,0 +1,17 @@
+# Build artifacts
+/pdfprint
+/pdfprint.exe
+/dist/
+*.out
+
+# OS junk
+.DS_Store
+
+# Local scratch
+/scratch/
+*.pcl
+*.ps
+!testdata/*.ps
+
+# Generated test fixture (regenerate with `make fixture`)
+/testdata/hello.pdf
