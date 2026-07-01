@@ -111,8 +111,13 @@ func Run(cfg Config) error {
 	return nil
 }
 
-// openOutput chooses the spooler or a file and returns a description for logs.
+// openOutput chooses the spooler, a file, or stdout, and returns a description.
 func openOutput(cfg Config) (spool.Writer, string, error) {
+	if cfg.OutputFile == "-" {
+		// Stream to stdout so it can be piped, e.g. into `lp -o raw` on macOS —
+		// the local analog of the Windows RAW spooler path.
+		return nopCloser{os.Stdout}, "stdout", nil
+	}
 	if cfg.OutputFile != "" {
 		w, err := spool.OpenFile(cfg.OutputFile)
 		return w, "file " + cfg.OutputFile, err
@@ -127,6 +132,11 @@ func openOutput(cfg Config) (spool.Writer, string, error) {
 	w, err := spool.Open(spool.Job{Printer: cfg.Printer, DocName: docName, Datatype: "RAW"})
 	return w, "printer " + cfg.Printer, err
 }
+
+// nopCloser adapts an io.Writer (os.Stdout) to spool.Writer without closing it.
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
 
 // runGS executes the Ghostscript command, piping stdin (if input is "-"),
 // stdout to the sink, and stderr to the log.
