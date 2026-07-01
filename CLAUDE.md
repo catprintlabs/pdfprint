@@ -17,12 +17,13 @@ printing via `pdfprint --output - | lp -o raw` (raw bypasses the CUPS driver):
 | Fixture | PostScript (`ps2write`) | PCL-XL |
 |---------|-------------------------|--------|
 | `testdata/legal_ruler.pdf` (vector no-scaling ruler) | ✅ 171 KB | ✅ `pxlmono` 19 KB |
-| real color imposition ticket (~12 MB, see note) | ✅ 6.6 MB | ✅ `pxlcolor` 11.7 MB |
+| color imposition ticket (~12 MB, see note) | ✅ 6.6 MB | ✅ `pxlcolor` 11.7 MB |
 
-> The real production ticket used for the color/raster verification was **removed
-> from the repo (and its history) because it contained customer PII**. A PII-free
-> dummy ticket fixture is pending; until then, use `legal_ruler.pdf` for the
-> color-path smoke test too (it still exercises PCL-XL/PS at 1:1).
+> The color/raster path was first verified with a real production ticket that was
+> **removed from the repo and its history for containing customer PII** (a
+> repo-delete+recreate purged the leaked LFS object). The committed fixture is now
+> the **sanitized** `testdata/W260701_1546917_ticket.pdf` (customer "Internal
+> Proof", no personal data) — the size figures above are from the original run.
 
 - **1:1 confirmed**: on the ruler print, tick N measures exactly N inches from
   the center crosshair; PCL-XL and PostScript output were visually identical.
@@ -33,9 +34,9 @@ printing via `pdfprint --output - | lp -o raw` (raw bypasses the CUPS driver):
 - `legal_ruler.pdf` / `legal_ruler.ps` — the **no-scaling test page**. 8.5×14"
   Legal (612×1008 pt), 1-inch ticks labeled in inches from center, edge frames
   at 0"/0.25"/0.5", center crosshair. `.ps` is the source; `.pdf` is what we print.
-- (pending) a PII-free dummy imposition ticket — a real one was used to verify
-  the color/raster path (612×1008 Legal, ImageMagick raster, ~12 MB) but was
-  removed for containing customer PII. A sanitized replacement will be added.
+- `W260701_1546917_ticket.pdf` — a **sanitized** imposition ticket (612×1008
+  Legal, ImageMagick raster, ~12 MB; customer "Internal Proof", no PII). The
+  real-workload color fixture. Replaced an earlier PII-bearing ticket.
 - `hello.pdf` — small Letter fixture (gitignored; regenerate with `make fixture`).
 
 ## How to run the smoke test
@@ -63,7 +64,7 @@ which cannot be exercised on macOS. On the PC:
 5. **Print** the same fixtures 1:1 and compare to the macOS output:
    ```bat
    pdfprint.exe --scale none --device pxlmono  --page-size Legal --printer "<exact name>" testdata\legal_ruler.pdf
-   :: (color-path ticket fixture pending; use pxlcolor on the dummy ticket once added)
+   pdfprint.exe --scale none --device pxlcolor --page-size Legal --printer "<exact name>" testdata\W260701_1546917_ticket.pdf
    ```
 6. **Watch for**: the RAW spooler path actually reaching the printer; output
    matching the macOS prints; the no-scaling guarantee holding (ruler ticks =
@@ -91,6 +92,12 @@ a Legal page — always pass `--page-size Legal` (works with or without a PPD).
   rasterize, assert 612×1008 + PCL/PS magic — turns today's manual check into CI.
 - (Proposed) `make print-test PRINTER=<queue>` convenience target.
 - Windows real-printer verification (section above).
+- **Experimental Crystal port** on branch `crystal-port` (not merged). A learning
+  reimplementation under `crystal/`. Phase 1 done: PPD parser + gs command builder
+  ported, `crystal spec` green (11 examples), emits a byte-identical gs command to
+  the Go tool. Phases 2 (Process/CLI) & 3 (winspool.drv FFI via `lib`/`fun`)
+  pending — see `crystal/README.md` on that branch. Needs Crystal 1.20+ (`brew
+  install crystal`). The Go tool on `main` is unaffected.
 - Longer-term (see `docs/DESIGN.md` "Not yet done"): full Foomatic option
   substitution, auto-locating a printer's PPD, UIConstraints, tray selection, N-up.
 
