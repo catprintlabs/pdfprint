@@ -7,6 +7,7 @@ package gs
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/catprintlabs/pdfprint/internal/ppd"
@@ -28,6 +29,7 @@ type Options struct {
 	PageSize   string // PPD PageSize keyword (e.g. "Letter"); default from PPD
 	Duplex     Duplex // none/long/short
 	Copies     int    // number of copies; <=1 means single
+	Fit        bool   // false (default) = print 1:1, NO scaling; true = scale to page
 	Color      *bool  // nil = follow PPD/device default; else force color/mono
 	InputPath  string // path to input PDF, or "-" for stdin
 	GSBinary   string // path to gs / gswin64c.exe; default "gs"
@@ -124,9 +126,29 @@ func Build(p *ppd.PPD, o Options) (Command, error) {
 		}
 	}
 
-	// Page geometry via a setpagedevice snippet built from the PPD choice.
-	if pd := pageDeviceSnippet(p, o); pd != "" {
-		args = append(args, "-c", pd, "-f")
+	// Page geometry. Resolve the target media size in points (from the PPD's
+	// PaperDimension / PageSize, or a built-in table for a bare --device run).
+	// We set it via -dDEVICEWIDTHPOINTS/-dDEVICEHEIGHTPOINTS at device init and
+	// lock it with -dFIXEDMEDIA. This is the only reliable way to force exact
+	// media: a `-c setpagedevice` after -dFIXEDMEDIA is ignored, and without
+	// fixing the size gs would default to Letter.
+	if w, h, ok := resolvePageDims(p, o.PageSize); ok {
+		args = append(args,
+			fmt.Sprintf("-dDEVICEWIDTHPOINTS=%d", w),
+			fmt.Sprintf("-dDEVICEHEIGHTPOINTS=%d", h),
+			"-dFIXEDMEDIA",
+		)
+	}
+	// Scaling policy. Default (Fit=false) is strict 1:1, no scaling — oversized
+	// content clips rather than scales. With Fit, gs scales pages to the media.
+	if o.Fit {
+		args = append(args, "-dPDFFitPage")
+	} else {
+		args = append(args, "-dPDFFitPage=false")
+	}
+	// Duplex / copies go through setpagedevice (not media, so safe after init).
+	if snippet := optionsSnippet(o); snippet != "" {
+		args = append(args, "-c", snippet, "-f")
 	}
 
 	args = append(args, o.Extra...)
@@ -144,28 +166,62 @@ func Build(p *ppd.PPD, o Options) (Command, error) {
 	return Command{Binary: bin, Args: args, Device: device}, nil
 }
 
-// pageDeviceSnippet builds the PostScript prologue that sets page size, duplex
-// and copy count. Page size prefers the PPD PageSize choice's own embedded code
-// (so we honor the exact media geometry the vendor defined); duplex and copies
-// are appended as a second setpagedevice call. Result is a single PostScript
-// string suitable for `gs -c <snippet> -f <input>`.
-func pageDeviceSnippet(p *ppd.PPD, o Options) string {
-	var snippets []string
+// knownSizes maps common media keywords to their PostScript point dimensions,
+// so --page-size works even without a PPD (a bare --device run against a real
+// PCL printer). Points = 1/72 inch. Legal (8.5x14") = 612 x 1008.
+var knownSizes = map[string][2]int{
+	"letter":    {612, 792},
+	"legal":     {612, 1008},
+	"a4":        {595, 842},
+	"a3":        {842, 1191},
+	"tabloid":   {792, 1224},
+	"ledger":    {1224, 792},
+	"executive": {522, 756},
+	"statement": {396, 612},
+}
 
-	// Page size: use the PPD PageSize choice's embedded setpagedevice fragment.
+// dimsRe pulls the first two numbers out of a PageSize choice's PostScript code,
+// e.g. "<</PageSize[612 1008]...>>" -> 612, 1008.
+var dimsRe = regexp.MustCompile(`\[\s*([0-9.]+)\s+([0-9.]+)`)
+
+// resolvePageDims resolves the target media size in points. It prefers, in
+// order: the PPD's *PaperDimension for the keyword, the numbers embedded in the
+// PPD PageSize choice code, then the built-in size table. When key is empty it
+// uses the PPD's default PageSize. Returns ok=false if nothing matches (in which
+// case gs falls back to the PDF's own MediaBox — still no scaling).
+func resolvePageDims(p *ppd.PPD, key string) (w, h int, ok bool) {
 	if p != nil {
-		if opt := p.Option("PageSize"); opt != nil {
-			key := o.PageSize
-			if key == "" {
+		if key == "" {
+			if opt := p.Option("PageSize"); opt != nil {
 				key = opt.Default
 			}
-			if ch := opt.Choice(key); ch != nil && strings.Contains(ch.Code, "PageSize") {
-				snippets = append(snippets, strings.TrimSpace(ch.Code))
+		}
+		if key != "" {
+			if wh, found := p.PaperDimension(key); found {
+				if w, h, ok := parseTwoNums(wh); ok {
+					return w, h, true
+				}
+			}
+			if opt := p.Option("PageSize"); opt != nil {
+				if ch := opt.Choice(key); ch != nil {
+					if m := dimsRe.FindStringSubmatch(ch.Code); m != nil {
+						if w, h, ok := parseTwoNums(m[1] + " " + m[2]); ok {
+							return w, h, true
+						}
+					}
+				}
 			}
 		}
 	}
+	if d, found := knownSizes[strings.ToLower(key)]; found {
+		return d[0], d[1], true
+	}
+	return 0, 0, false
+}
 
-	// Duplex + copies via standard PostScript keys.
+// optionsSnippet builds the setpagedevice prologue for duplex and copies (not
+// media — those are set at device init). Returns "" when nothing to set.
+func optionsSnippet(o Options) string {
 	var kv []string
 	switch o.Duplex {
 	case DuplexLong:
@@ -178,9 +234,22 @@ func pageDeviceSnippet(p *ppd.PPD, o Options) string {
 	if o.Copies > 1 {
 		kv = append(kv, fmt.Sprintf("/NumCopies %d", o.Copies))
 	}
-	if len(kv) > 0 {
-		snippets = append(snippets, "<< "+strings.Join(kv, " ")+" >> setpagedevice")
+	if len(kv) == 0 {
+		return ""
 	}
+	return "<< " + strings.Join(kv, " ") + " >> setpagedevice"
+}
 
-	return strings.Join(snippets, " ")
+// parseTwoNums parses "W H" (possibly fractional) into rounded integer points.
+func parseTwoNums(s string) (int, int, bool) {
+	f := strings.Fields(s)
+	if len(f) < 2 {
+		return 0, 0, false
+	}
+	w, err1 := strconv.ParseFloat(f[0], 64)
+	h, err2 := strconv.ParseFloat(f[1], 64)
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return int(w + 0.5), int(h + 0.5), true
 }

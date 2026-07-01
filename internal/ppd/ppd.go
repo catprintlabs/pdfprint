@@ -70,8 +70,26 @@ type PPD struct {
 	// FoomaticSettings maps optionKeyword -> choiceKeyword -> code snippet.
 	FoomaticSettings map[string]map[string]string
 
+	// PaperDimensions maps a PageSize keyword to its physical "width height" in
+	// PostScript points (from *PaperDimension lines) — the authoritative media
+	// size we hand to Ghostscript.
+	PaperDimensions map[string]string
+
 	Options     map[string]*Option // keyed by option keyword
 	optionOrder []string
+}
+
+// PaperDimension returns the "w h" points string for a keyword (case-insensitive).
+func (p *PPD) PaperDimension(keyword string) (string, bool) {
+	if v, ok := p.PaperDimensions[keyword]; ok {
+		return v, true
+	}
+	for k, v := range p.PaperDimensions {
+		if strings.EqualFold(k, keyword) {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // Option returns the named option (case-insensitive) or nil.
@@ -112,6 +130,7 @@ func ParseFile(path string) (*PPD, error) {
 func Parse(r io.Reader) (*PPD, error) {
 	p := &PPD{
 		FoomaticSettings: map[string]map[string]string{},
+		PaperDimensions:  map[string]string{},
 		Options:          map[string]*Option{},
 	}
 
@@ -138,6 +157,11 @@ func Parse(r io.Reader) (*PPD, error) {
 			p.ColorDevice = strings.EqualFold(strings.TrimSpace(s.value), "true")
 		case s.main == "cupsFilter" || s.main == "cupsFilter2":
 			p.CUPSFilters = append(p.CUPSFilters, unquote(s.value))
+		case s.main == "PaperDimension":
+			// *PaperDimension Legal: "612 1008"
+			if s.option != "" {
+				p.PaperDimensions[s.option] = unquote(s.value)
+			}
 		case s.main == "FoomaticRIPCommandLine":
 			p.FoomaticRIPCommandLine = unquote(s.value)
 		case s.main == "FoomaticRIPOptionSetting":

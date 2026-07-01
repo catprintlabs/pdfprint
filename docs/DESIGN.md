@@ -121,6 +121,33 @@ On the Mac, end-to-end, real output — not mocks:
 - Media source / input-tray selection.
 - N-up, scaling, page ranges (the `pdftopdf` pre-filter stage).
 
+## 8a. "No scaling" and exact media (added for real-printer testing)
+
+Mitch's first real test: send an 8.5×14 (Legal) PDF to a Legal-only printer with
+**no scaling**. Requirements this drove:
+
+- **Guaranteed 1:1.** Default is `--scale none`: no fit, page placed at native
+  size; over-sized content clips rather than shrinks.
+- **Exact media, even without a PPD** (bare `--device` run against a real PCL
+  printer), via a built-in size table plus the PPD's `*PaperDimension`.
+
+**Bug found and fixed (important).** The first implementation set the size with
+`-c "<</PageSize[612 1008]>>setpagedevice"` *after* `-dFIXEDMEDIA`. We caught —
+by rasterizing the output to PNG and measuring — that it silently produced
+**Letter (8.5×11), not Legal**: `-dFIXEDMEDIA` locks the media to gs's default
+(Letter) at init, so the later `setpagedevice` was ignored. The fix is the only
+reliable method: set the media at device init with
+`-dDEVICEWIDTHPOINTS=<w> -dDEVICEHEIGHTPOINTS=<h> -dFIXEDMEDIA`. Now verified to
+rasterize to exactly 5100×8400 px = 8.5×14" @ 600 dpi. Locked in by unit tests
+in `internal/gs/gs_test.go`.
+
+Lesson: trust rasterized pixel dimensions, not the PCL/PS header, when verifying
+geometry.
+
+Also added: Ghostscript auto-detection (the Windows installer usually skips
+PATH) and `--list-printers` (winspool `EnumPrinters`) so the exact `--printer`
+name is easy to get.
+
 ## 9. How to pick up from here
 
 ```sh

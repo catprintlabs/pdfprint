@@ -5,6 +5,7 @@ package spool
 import (
 	"fmt"
 	"syscall"
+	"unicode/utf16"
 	"unsafe"
 )
 
@@ -17,7 +18,73 @@ var (
 	procEndPagePrinter   = winspool.NewProc("EndPagePrinter")
 	procEndDocPrinter    = winspool.NewProc("EndDocPrinter")
 	procClosePrinter     = winspool.NewProc("ClosePrinter")
+	procEnumPrinters     = winspool.NewProc("EnumPrintersW")
 )
+
+const (
+	printerEnumLocal       = 0x00000002
+	printerEnumConnections = 0x00000004
+)
+
+// printerInfo4 mirrors Win32 PRINTER_INFO_4W — the fast enumeration level.
+type printerInfo4 struct {
+	pPrinterName *uint16
+	pServerName  *uint16
+	attributes   uint32
+}
+
+// ListPrinters returns the names of installed/connected printers, exactly as
+// they must be passed to --printer.
+func ListPrinters() ([]string, error) {
+	flags := uintptr(printerEnumLocal | printerEnumConnections)
+
+	// First call: discover the required buffer size.
+	var needed, returned uint32
+	procEnumPrinters.Call(
+		flags, 0, 4, // Level 4
+		0, 0,
+		uintptr(unsafe.Pointer(&needed)),
+		uintptr(unsafe.Pointer(&returned)),
+	)
+	if needed == 0 {
+		return nil, nil // no printers
+	}
+
+	buf := make([]byte, needed)
+	r, _, e := procEnumPrinters.Call(
+		flags, 0, 4,
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(needed),
+		uintptr(unsafe.Pointer(&needed)),
+		uintptr(unsafe.Pointer(&returned)),
+	)
+	if r == 0 {
+		return nil, fmt.Errorf("EnumPrinters: %w", e)
+	}
+
+	names := make([]string, 0, returned)
+	stride := unsafe.Sizeof(printerInfo4{})
+	for i := uintptr(0); i < uintptr(returned); i++ {
+		info := (*printerInfo4)(unsafe.Pointer(&buf[i*stride]))
+		names = append(names, utf16PtrToString(info.pPrinterName))
+	}
+	return names, nil
+}
+
+// utf16PtrToString reads a NUL-terminated UTF-16 string from a raw pointer.
+func utf16PtrToString(p *uint16) string {
+	if p == nil {
+		return ""
+	}
+	var u []uint16
+	for ptr := unsafe.Pointer(p); ; ptr = unsafe.Add(ptr, 2) {
+		c := *(*uint16)(ptr)
+		if c == 0 {
+			break
+		}
+		u = append(u, c)
+	}
+	return string(utf16.Decode(u))
+}
 
 // docInfo1 mirrors Win32 DOC_INFO_1.
 type docInfo1 struct {

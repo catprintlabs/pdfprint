@@ -10,3 +10,8 @@ import "fmt"
 func Open(job Job) (Writer, error) {
 	return nil, fmt.Errorf("spooler output is only available on Windows; use --output <file> to capture the raw stream on this platform")
 }
+
+// ListPrinters is Windows-only; off Windows there is no spooler to query.
+func ListPrinters() ([]string, error) {
+	return nil, fmt.Errorf("--list-printers is only available on Windows")
+}

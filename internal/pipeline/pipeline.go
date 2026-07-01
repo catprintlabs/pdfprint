@@ -27,6 +27,7 @@ type Config struct {
 	PageSize   string
 	Duplex     gs.Duplex
 	Copies     int
+	Fit        bool // false = 1:1 no scaling (default)
 	Color      *bool
 
 	GSBinary string
@@ -42,6 +43,16 @@ func Run(cfg Config) error {
 	logf := cfg.Logf
 	if logf == nil {
 		logf = func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) }
+	}
+
+	// 0. Resolve the Ghostscript binary (auto-detect on Windows).
+	gsBin, found := gs.FindBinary(cfg.GSBinary)
+	cfg.GSBinary = gsBin
+	if !found && !cfg.DryRun {
+		return fmt.Errorf("Ghostscript not found (looked for %q plus standard install dirs); install it or pass --gs <path to gswin64c.exe>", cfg.GSBinary)
+	}
+	if cfg.Verbose {
+		logf("ghostscript: %s", gsBin)
 	}
 
 	// 1. Parse the PPD (optional but strongly recommended).
@@ -64,6 +75,7 @@ func Run(cfg Config) error {
 		PageSize:   cfg.PageSize,
 		Duplex:     cfg.Duplex,
 		Copies:     cfg.Copies,
+		Fit:        cfg.Fit,
 		Color:      cfg.Color,
 		InputPath:  cfg.InputPath,
 		GSBinary:   cfg.GSBinary,

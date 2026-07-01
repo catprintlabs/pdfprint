@@ -25,6 +25,7 @@ import (
 
 	"github.com/catprintlabs/pdfprint/internal/gs"
 	"github.com/catprintlabs/pdfprint/internal/pipeline"
+	"github.com/catprintlabs/pdfprint/internal/spool"
 )
 
 func main() {
@@ -38,13 +39,20 @@ func main() {
 		pageSize   = flag.String("page-size", "", "PPD PageSize keyword (default: PPD default)")
 		duplexFlag = flag.String("duplex", "none", "duplex mode: none | long | short")
 		copies     = flag.Int("copies", 1, "number of copies")
+		scaleFlag  = flag.String("scale", "none", "scaling: none (1:1, no scaling) | fit (scale to page)")
 		colorFlag  = flag.String("color", "auto", "color mode: auto | color | mono")
-		gsBinary   = flag.String("gs", defaultGS(), "path to the Ghostscript binary")
+		gsBinary   = flag.String("gs", "", "path to the Ghostscript binary (auto-detected if empty)")
+		listPrn    = flag.Bool("list-printers", false, "list installed Windows printers and exit")
 		dryRun     = flag.Bool("dry-run", false, "print the resolved Ghostscript command and exit")
 		verbose    = flag.Bool("v", false, "verbose logging")
 	)
 	flag.Usage = usage
 	flag.Parse()
+
+	if *listPrn {
+		listPrinters()
+		return
+	}
 
 	input := flag.Arg(0)
 	if input == "" {
@@ -61,6 +69,10 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	fit, err := parseScale(*scaleFlag)
+	if err != nil {
+		fatal(err)
+	}
 
 	cfg := pipeline.Config{
 		InputPath:  input,
@@ -73,6 +85,7 @@ func main() {
 		PageSize:   *pageSize,
 		Duplex:     duplex,
 		Copies:     *copies,
+		Fit:        fit,
 		Color:      color,
 		GSBinary:   *gsBinary,
 		DryRun:     *dryRun,
@@ -111,12 +124,30 @@ func parseColor(s string) (*bool, error) {
 	}
 }
 
-// defaultGS picks the conventional Ghostscript binary name per platform.
-func defaultGS() string {
-	if os.PathSeparator == '\\' { // Windows
-		return "gswin64c.exe"
+func parseScale(s string) (bool, error) {
+	switch s {
+	case "none", "", "1:1":
+		return false, nil // no scaling
+	case "fit":
+		return true, nil
+	default:
+		return false, fmt.Errorf("invalid --scale %q (want none|fit)", s)
 	}
-	return "gs"
+}
+
+// listPrinters prints installed printer names (Windows only).
+func listPrinters() {
+	names, err := spool.ListPrinters()
+	if err != nil {
+		fatal(err)
+	}
+	if len(names) == 0 {
+		fmt.Fprintln(os.Stderr, "no printers found")
+		return
+	}
+	for _, n := range names {
+		fmt.Println(n)
+	}
 }
 
 func usage() {
