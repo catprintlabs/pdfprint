@@ -1,0 +1,14 @@
+name: pdfprint
+version: 0.1.0
+description: |
+  Crystal port of pdfprint — print a PDF by translating it to the printer's
+  native language (PCL/PostScript) with Ghostscript, driven by a PPD, then
+  streaming it to the Windows RAW spooler. A port of the CUPS/foomatic-rip
+  approach (original implementation in Go, in the repo root).
+
+authors:
+  - Catmando
+
+crystal: ">= 1.20.0"
+
+license: MIT
