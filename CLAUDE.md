@@ -13,6 +13,34 @@ note — it lives on the PC. **Next session: `git fetch` first**; the PC changes
 committed and pushed *from the PC*. If they aren't on `origin/main` yet, they're
 still only on that machine. Everything below reflects the last macOS-side state.
 
+## ⚠️ TODO — release-process check (for the Claude session doing this merge)
+Mitch built/tested `pdfprint.exe` on the PC and a prior PC-side session may have
+set up a GitHub Release — but **possibly did it via Git LFS / by committing the
+exe**, which is wrong. Before finishing, verify and correct the release process:
+
+1. **The Windows `.exe` must ship as a GitHub *Release asset*, NOT in the repo
+   and NOT via Git LFS.** Check for mistakes:
+   - Did any session run `git lfs track "*.exe"`? Inspect `.gitattributes` — if
+     there's an `*.exe`/`pdfprint.exe` LFS rule, **remove it**.
+   - Did a `pdfprint.exe` get committed (directly or as an LFS pointer)?
+     `git log --all --oneline -- '*.exe'` and `git ls-files '*.exe'`. If so,
+     remove it from the tree (and history if needed) and confirm `.gitignore`
+     still ignores `/pdfprint.exe`.
+2. **Correct way to publish the build:**
+   ```sh
+   go build -o pdfprint.exe ./cmd/pdfprint    # or: make windows
+   gh release create vX.Y.Z pdfprint.exe \
+     --title "pdfprint vX.Y.Z" --notes "Windows build; PDF->gs->PCL/PS->RAW spooler, 1:1."
+   ```
+   Then verify the asset downloads from the repo's Releases page. Tag the commit
+   the build came from.
+3. **Why:** binaries in Git/LFS bloat the repo and consume LFS storage/bandwidth;
+   Releases are the right channel and give a stable versioned download URL. Only
+   source + fixtures belong in the repo (fixtures are the *only* LFS use — see
+   `.gitattributes`, which should list `testdata/*.pdf` and nothing else).
+
+Delete this TODO once the release process is confirmed correct.
+
 ## What this tool is (one line)
 `pdfprint` gives Windows the PDF print path it lacks: PDF → Ghostscript → the
 printer's native language (PCL-XL / PostScript) → RAW spooler, at 1:1 with no
