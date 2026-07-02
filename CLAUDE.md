@@ -5,6 +5,14 @@ whoever pulls it — including on a different machine/OS — starts with the sam
 picture. See `docs/DESIGN.md` for the *why* (architecture & decision log); this
 file is the *where we are & what's next*.
 
+## Status flash (2026-07-02)
+Windows real-printer testing/debugging is **in progress on a Windows PC and
+reported "almost ready"** by Mitch. That work was **not yet pushed** as of this
+note — it lives on the PC. **Next session: `git fetch` first**; the PC changes
+(the `--printer` RAW-spooler path finally exercised on real hardware) should be
+committed and pushed *from the PC*. If they aren't on `origin/main` yet, they're
+still only on that machine. Everything below reflects the last macOS-side state.
+
 ## What this tool is (one line)
 `pdfprint` gives Windows the PDF print path it lacks: PDF → Ghostscript → the
 printer's native language (PCL-XL / PostScript) → RAW spooler, at 1:1 with no
