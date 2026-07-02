@@ -445,14 +445,15 @@ the packaged app and `electron-updater` auto-updates clients.
 
 ## Status
 
-Verified end-to-end on Windows *and* macOS: a Legal no-scaling test page prints
-1:1 (measured on paper — tick *N* lands exactly *N* inches from center) via both
-PostScript (`ps2write`) and PCL-XL (`pxlmono`/`pxlcolor`), matching in size across
-platforms. On Windows it prints through a printer's *existing WSD queue* with no
-port/queue/driver setup — the tool auto-discovers the device IP, auto-detects the
-device via IPP, and streams over raw TCP. No-scaling is guaranteed via
-`-dDEVICEWIDTHPOINTS/HEIGHTPOINTS` + `-dFIXEDMEDIA` and confirmed by rasterizing
-output to exact pixel dimensions.
+Verified end-to-end on **macOS and three different Windows 11 machines**, against
+**two printer brands**: a Legal no-scaling test page prints 1:1 (measured on
+paper — tick *N* lands exactly *N* inches from center) via all three output paths —
+PostScript (`ps2write`), PCL-XL (`pxlmono`/`pxlcolor`), and PCL5e (`ljet4`) —
+matching in size across platforms. On Windows it prints through a printer's
+*existing WSD queue* with no port/queue/driver setup — the tool auto-discovers the
+device IP, auto-detects the device via IPP, and streams over raw TCP. No-scaling is
+guaranteed via `-dDEVICEWIDTHPOINTS/HEIGHTPOINTS` + `-dFIXEDMEDIA` and confirmed by
+rasterizing output to exact pixel dimensions.
 
 ### Not yet done / next
 

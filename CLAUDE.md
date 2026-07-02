@@ -31,12 +31,22 @@ printing via `pdfprint --output - | lp -o raw` (raw bypasses the CUPS driver):
 - Size inversion worth remembering: PCL-XL is far *smaller* than PS for vector
   pages (ruler) but *larger* for rasterized image pages (the ticket).
 
-### Windows (2026-07-01) — the real target, now verified ✅
-The Windows path (the whole reason this tool exists) is proven end-to-end on the
-same Xerox VersaLink C620. `pdfprint --printer "<name>"` prints `legal_ruler.pdf`
-at 1:1 via both `ps2write` and `pxlmono`, using the printer's **existing WSD
-queue** — the tool auto-discovers the device IP and streams over raw TCP. Output
-matches the macOS runs in size (PS ~166 KB, PCL-XL ~19 KB), confirmed on paper.
+### Windows (2026-07-02) — the real target, verified across a fleet ✅
+The Windows path (the whole reason this tool exists) is proven end-to-end on
+**three different Windows 11 machines** against **two different printer brands**,
+including one printer driven via **PCL5e (`ljet4`)**. So all three language paths
+are now exercised on real hardware, not just PCL-XL/PostScript:
+`ps2write` (PostScript), `pxlcolor`/`pxlmono` (PCL-XL / PCL 6), **and `ljet4`
+(PCL5e)**. `pdfprint --printer "<name>"` prints `legal_ruler.pdf` at 1:1 via each
+printer's **existing WSD queue** — the tool auto-discovers the device IP and
+streams over raw TCP. Output matched across machines and matched the macOS runs
+in size (PS ~166 KB, PCL-XL ~19 KB), confirmed on paper.
+
+First proven on the Xerox VersaLink C620 (details below); the three-box /
+two-brand run extended that to a second printer brand and the PCL5e path.
+**TODO (fill in when convenient):** record the second printer's exact brand/model
+(the one using `ljet4`/PCL5e) and the two additional Win11 boxes — useful for the
+next machine to reproduce.
 
 Dev box for Windows testing: Go 1.26.x and Ghostscript 10.07.1 installed (gs at
 `C:\Program Files\gs\gs10.07.1\bin\gswin64c.exe`, auto-detected). The C620 fleet
