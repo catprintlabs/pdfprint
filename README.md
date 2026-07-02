@@ -17,61 +17,54 @@ do the rasterizing at device resolution.
 
 ## Quick start
 
-1. **Have Ghostscript available.** In a packaged build it's **bundled** — the
-   two gs files ride next to `pdfprint.exe`, so end users install nothing (see
-   [Packaging](#packaging--releasing)). Running the bare `pdfprint.exe` yourself?
-   Either drop a `gs\` folder beside it (`scripts/vendor-gs.ps1`, ~24 MB) or
-   install 64-bit Ghostscript system-wide — `pdfprint` finds any of these
-   automatically (`--gs` overrides).
-2. **Print.** The output device and the transport are detected automatically from
-   the printer, so the simplest case is just:
+### 1. Install
 
-   ```bat
-   pdfprint --printer "<printer name>" job.pdf
-   ```
+1. Download **`pdfprint-windows-amd64.zip`** from the [Releases](../../releases) page.
+2. Right-click it → **Extract All** → pick a folder, e.g. `C:\pdfprint`.
 
-`--printer` accepts any **unique substring** of an installed printer's name, so
-you rarely need the full string:
+That's the whole install — no installer, no admin rights. Windows `.exe`s need no
+"make executable" step, and **Ghostscript is bundled**: a `gs\` folder extracts
+right alongside the binaries, so there's nothing else to download. Just keep the
+three items together — `pdfprint.exe`, `stamp.exe`, and `gs\`.
+
+Extracting does **not** put `pdfprint` on your PATH, so out of the box you run it
+from a terminal opened *in* that folder (Shift+right-click the folder → *Open
+PowerShell window here*). To type just `pdfprint` from anywhere, add the folder to
+your PATH once (no admin needed; reopen the terminal afterward):
+
+```powershell
+setx PATH "$env:PATH;C:\pdfprint"
+```
+
+> Already have 64-bit Ghostscript installed, or want to use your own copy? The
+> bundled `gs\` is optional — see [Ghostscript](#ghostscript).
+
+### 2. Print
+
+The output device and transport are detected automatically from the printer, so
+the simplest case is just:
 
 ```bat
-pdfprint --list-printers                 :: see exact names
-pdfprint --printer "LaserJet 600" job.pdf
-pdfprint --printer "<name>" --dry-run job.pdf   :: preview device+transport, print nothing
+pdfprint --printer "<printer name>" job.pdf
+```
+
+`--printer` accepts any **unique substring** of an installed printer's name, so you
+rarely need the full string:
+
+```bat
+pdfprint --list-printers                        :: see exact names
+pdfprint --printer "LaserJet" job.pdf           :: will match "LaserJet 600"
+pdfprint --printer "<name>" --dry-run job.pdf   :: preview device+transport, prints nothing
 ```
 
 Printing is **1:1 with no scaling** by default. That's the whole tool for most
 uses; everything below is detail and control.
 
-## Install (standalone Windows)
-
-Outside the Electron app, install is just **download → extract → run** — no
-installer, no admin rights, no PATH edits, and **Ghostscript is bundled** (nothing
-else to install):
-
-1. Download **`pdfprint-windows-amd64.zip`** from the repo's **Releases** page.
-2. Right-click it → **Extract All** → pick a folder (e.g. `C:\pdfprint`).
-3. Done. The folder holds `pdfprint.exe`, `stamp.exe`, and a `gs\` folder — keep
-   them together.
-
-Run it from a terminal opened in that folder (Shift+right-click the folder →
-*Open PowerShell window here*):
-
-```bat
-pdfprint.exe --list-printers
-pdfprint.exe --printer "<name or unique substring>" job.pdf
-```
-
-A first run may show two one-time prompts:
-- **"Windows protected your PC"** — the exe is unsigned; click **More info → Run
-  anyway**. (Code-signing would remove this.)
-- A **firewall prompt** on the first network print — **Allow** it (needed to reach
-  a network printer).
-
-Optional: add the folder to your PATH to run `pdfprint` from anywhere. The bundle
-includes Ghostscript unmodified under the AGPL-3.0 (`gs\GHOSTSCRIPT-*.txt`).
-
-*(The bare `pdfprint.exe` / `stamp.exe` are also published as separate Release
-assets — for the Electron app, or when Ghostscript is already present.)*
+*Note: A first print may show two one-time prompts:*
+- ***"Windows protected your PC"** — the exe is unsigned; click **More info → Run
+  anyway**. (Code-signing would remove this.)*
+- *A **firewall prompt** on the first network print — **Allow** it (needed to reach
+  a network printer).*
 
 ## How it works
 
@@ -84,11 +77,11 @@ PDF ─▶ [parse PPD] ─▶ [build Ghostscript command] ─▶ [run gs] ─▶
 1. **Parse the PPD** (optional). A PPD describes the printer and, for
    non-PostScript printers, names the Ghostscript output device
    (`*FoomaticRIPCommandLine`), page sizes, duplex, and resolution — exactly what
-   `foomatic-rip` reads. Without a PPD, `pdfprint` detects the device from the
+   `foomatic-rip` reads. If no PPD is supplied on the command line, `pdfprint` detects the device from the
    printer instead (see [Devices](#devices--auto-detection)).
 2. **Build the Ghostscript command.** Pick the device (`pxlcolor`/`pxlmono` for
    PCL-XL/PCL6, `ljet4` for PCL5, `ps2write` for PostScript), resolution, page
-   geometry, duplex, and copy count — from the PPD or detection, overridable by
+   geometry, duplex, and copy count — from the PPD or detection, all overridable by
    flags.
 3. **Run Ghostscript.** `gs` translates the PDF into the printer's native
    language. Text and vectors stay as native PCL/PS commands; only content the
@@ -109,7 +102,7 @@ Windows is missing.
 ### Selecting the printer
 
 - `--printer <name-or-substring>` — the installed printer. Any substring that
-  **uniquely** identifies one printer works (an exact name always wins). If a
+  **uniquely** identifies one printer works. If a
   substring matches more than one printer, `pdfprint` lists the matches and stops.
 - `--host <ip[:port]>` (with `--port`, default 9100) — skip the installed queues
   entirely and dial a network printer directly over raw TCP. Works on any OS.
@@ -138,8 +131,10 @@ printers and imagesetters.
 **asks the printer** which languages it accepts — over IPP (port 631), falling
 back to SNMP (161) — and chooses accordingly, preferring native PCL-XL. It always
 reports what it detected and what it chose. If it **can't** detect (the printer is
-unreachable, or you're writing to a file), it **refuses rather than guess** — pass
-`--device`. Inspect detection without printing:
+unreachable, or you're writing to a file), it **refuses rather than guess** —  you must pass
+`--device`. 
+
+To inspect detection without printing:
 
 ```bat
 pdfprint --probe --printer "<name>"
@@ -170,12 +165,12 @@ default) from the printer you name:
 - **Local/USB printer → Windows RAW spooler** (`WritePrinter` with the `RAW`
   datatype), where raw passthrough works correctly.
 
-**Why not always the spooler?** Because spooling the RAW datatype to a **WSD
+_**Why not always the spooler?** Because spooling the RAW datatype to a **WSD
 port** or a **V4 print driver** silently *fails*: the spooler accepts the job,
 reports success, and the device prints nothing (WSD/V4 force jobs through the
 XPS/print-filter pipeline, which discards raw PCL/PS). Most modern network
 printers install as WSD by default, so `pdfprint` routes around this by talking
-to the device directly.
+to the device directly._
 
 Overrides for edge cases:
 
@@ -198,6 +193,8 @@ media is locked to the requested size (`-dDEVICEWIDTHPOINTS/HEIGHTPOINTS` +
 PPD's `*PaperDimension`; without one it uses a built-in table (Letter, Legal, A4,
 A3, Tabloid, Ledger, Executive, Statement). With no `--page-size`, gs uses the
 PDF's own MediaBox (still 1:1).
+
+You can also specify the page size in absolute dimensions:  i.e. 8.5x14in or 200
 
 ### Other options
 
@@ -234,6 +231,33 @@ pdfprint --scale none --device ps2write --page-size Legal --output - job.pdf \
 ```
 
 (`--host <ip>` also works cross-platform if you prefer to skip CUPS entirely.)
+
+## Ghostscript
+
+`pdfprint` uses **Ghostscript** as its rendering engine — it shells out to `gs` as
+a separate process (it does *not* link `libgs`). The Windows release **bundles** it,
+so most users install nothing: a working gs is just two files (`gswin64c.exe` +
+`gsdll64.dll`, ~24 MB — gs ROM-embeds its resources into the DLL), and they ride in
+the `gs\` folder that extracts beside `pdfprint.exe`.
+
+**Using your own copy.** You don't need the bundled `gs\` if you already have
+64-bit Ghostscript, or want to point at a specific build. `pdfprint` resolves gs in
+this order:
+
+1. `--gs <path>` — an explicit path you pass.
+2. A gs bundled next to the exe (`<exedir>\gs\gswin64c.exe`).
+3. A system-wide install (`C:\Program Files\gs\gs*\bin\gswin64c.exe`).
+4. `gswin64c` / `gs` on your PATH.
+
+So a bundled gs is used deterministically when present, and an existing system gs
+still works when nothing is bundled. Install 64-bit Ghostscript from
+<https://ghostscript.com/releases/>, or drop a `gs\` folder beside the exe yourself
+with `scripts/vendor-gs.ps1`.
+
+The bundled Ghostscript is included **unmodified** under the **AGPL-3.0**
+(`gs\GHOSTSCRIPT-*.txt`); see [License](#license). The bare `pdfprint.exe` /
+`stamp.exe` are also published as separate Release assets, for when Ghostscript is
+already present.
 
 ## Testing
 
@@ -373,7 +397,7 @@ Pushing the tag runs the workflow, which:
 2. cross-compiles `pdfprint.exe` / `stamp.exe` (windows/amd64) from Linux,
 3. downloads the official Windows Ghostscript and packages a self-contained
    **`pdfprint-windows-amd64.zip`** — exes + bundled `gs\` + its AGPL
-   license/source (see [Install](#install-standalone-windows)),
+   license/source (see [Ghostscript](#ghostscript)),
 4. publishes all three (the two exes and the zip) as **GitHub Release assets**.
 
 **Verify:** the **Actions** tab shows the `release` run green, and the
