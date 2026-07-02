@@ -1,8 +1,9 @@
 name: release
 
-# Build the Windows binaries on a version tag and publish them as GitHub Release
-# assets. The repo stays source-only; the Electron app consumes these assets
-# (plus a vendored Ghostscript) at package time.
+# On a version tag, build the Windows binaries and publish them as GitHub
+# Release assets: the bare exes (for the Electron app / other consumers) and a
+# self-contained pdfprint-windows-amd64.zip (exes + bundled Ghostscript) for the
+# standalone "download, extract, run" install. The repo stays source-only.
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 
@@ -12,6 +13,10 @@ on:
 
 permissions:
   contents: write # required to create the Release and upload assets
+
+env:
+  GS_TAG: gs10071 # Ghostscript 10.07.1 (bundled UNMODIFIED, AGPL-3.0)
+  GS_VERSION: 10.07.1
 
 jobs:
   build:
@@ -39,15 +44,61 @@ jobs:
           go build -trimpath -ldflags "-s -w" -o dist/stamp.exe    ./cmd/stamp
           ls -l dist
 
-      # Create the Release (if needed) and upload the assets via the gh CLI —
-      # no third-party actions, uses the built-in token.
+      # Pull the official Windows Ghostscript and extract the two files a working
+      # gs needs (resources are ROM'd into gsdll64.dll). NSIS installers unpack
+      # with 7z; find the binaries rather than hardcoding paths.
+      - name: Fetch Ghostscript (Windows) for the bundle
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full zip
+          url="https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/${GS_TAG}/${GS_TAG}w64.exe"
+          echo "Downloading $url"
+          curl -fsSL "$url" -o gs-installer.exe
+          7z x -y -ogs-extract gs-installer.exe >/dev/null
+          mkdir -p gsbin
+          cp "$(find gs-extract -name gswin64c.exe | head -1)" gsbin/gswin64c.exe
+          cp "$(find gs-extract -name gsdll64.dll  | head -1)" gsbin/gsdll64.dll
+          # AGPL license text: prefer the one shipped in the installer, else fetch it.
+          lic="$(find gs-extract -type f \( -iname 'COPYING*' -o -iname 'LICENSE*' \) | head -1)"
+          if [ -n "$lic" ]; then cp "$lic" gsbin/GHOSTSCRIPT-LICENSE.txt; \
+          else curl -fsSL https://www.gnu.org/licenses/agpl-3.0.txt -o gsbin/GHOSTSCRIPT-LICENSE.txt; fi
+          ls -l gsbin
+
+      - name: Package standalone zip (exe + gs + license)
+        run: |
+          pkg="pdfprint-windows-amd64"
+          mkdir -p "$pkg/gs"
+          cp dist/pdfprint.exe dist/stamp.exe "$pkg/"
+          cp gsbin/gswin64c.exe gsbin/gsdll64.dll gsbin/GHOSTSCRIPT-LICENSE.txt "$pkg/gs/"
+          printf '%s\n' \
+            'Ghostscript (gs/gswin64c.exe, gs/gsdll64.dll) is included UNMODIFIED,' \
+            "version ${GS_VERSION}, under the GNU AGPL v3.0 (see GHOSTSCRIPT-LICENSE.txt)." \
+            'Corresponding source (installer + source tarball) is available at:' \
+            "  https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/tag/${GS_TAG}" \
+            > "$pkg/gs/GHOSTSCRIPT-SOURCE.txt"
+          printf '%s\n' \
+            'pdfprint - standalone Windows build' \
+            '' \
+            'Keep this folder together: pdfprint.exe, stamp.exe, and the gs\ folder.' \
+            'Ghostscript is bundled in gs\, so there is nothing else to install.' \
+            '' \
+            'Run from a terminal opened in this folder, e.g.:' \
+            '  pdfprint.exe --list-printers' \
+            '  pdfprint.exe --printer "<name or unique substring>" job.pdf' \
+            '' \
+            'First run may show "Windows protected your PC" (the exe is unsigned):' \
+            '  click More info -> Run anyway. Allow network access if the firewall' \
+            '  prompts (needed to reach a network printer).' \
+            > "$pkg/README.txt"
+          zip -r "${pkg}.zip" "$pkg" >/dev/null
+          ls -l "${pkg}.zip"
+
       - name: Publish Release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            dist/pdfprint.exe dist/stamp.exe \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            || gh release upload "${GITHUB_REF_NAME}" \
-                 dist/pdfprint.exe dist/stamp.exe --clobber
+            dist/pdfprint.exe dist/stamp.exe pdfprint-windows-amd64.zip \
+            --title "${GITHUB_REF_NAME}" --generate-notes \
+          || gh release upload "${GITHUB_REF_NAME}" \
+            dist/pdfprint.exe dist/stamp.exe pdfprint-windows-amd64.zip --clobber

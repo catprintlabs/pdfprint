@@ -61,7 +61,7 @@ This is exactly the CUPS behavior, and it's why it's both robust and compact.
 |---|---|---|---|
 | Direction | Print existing PDFs → physical printers | The actual pain point | Virtual "Print to PDF"; full print-server |
 | Rendering engine | **Ghostscript** | Already does PDF→PCL/PS; runs on Windows; it's literally what CUPS/foomatic use | pdfium/MuPDF (would need to write our own PCL emitter) |
-| Licensing | **AGPL Ghostscript OK** (Mitch) | Tool is **internal-use only**, not distributed | Commercial gs license / permissive engine (unnecessary for internal use) |
+| Licensing | **AGPL Ghostscript OK**; pdfprint itself **MIT** | gs is exec'd as a separate process (mere aggregation), so its AGPL doesn't reach pdfprint's code. Repo is public and the standalone zip bundles gs, so that gs copy ships with its AGPL license + source link. | Making pdfprint AGPL (needless copyleft on our own tool); a commercial gs license (unnecessary) |
 | Language | **Go** (Mitch confirmed) | Single static `.exe`, trivial cross-compile from his Mac (`GOOS=windows`), direct `winspool.drv` syscalls, shells out to gs like foomatic does | Python+PyInstaller (must build exe on Windows), C#/.NET (new lang for a Ruby/JS shop), Ruby (no clean single-exe, awkward Win32) |
 | Device selection | **PPD-driven** (Mitch: "detect from PPD") | Faithful to foomatic; works across mixed fleets | Hardcoding a device |
 | Delivery | **CLI / EXE** | Scriptable, integrates into existing workflow | Windows service, library/SDK, GUI (all deferred) |

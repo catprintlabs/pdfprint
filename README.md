@@ -42,6 +42,37 @@ pdfprint --printer "<name>" --dry-run job.pdf   :: preview device+transport, pri
 Printing is **1:1 with no scaling** by default. That's the whole tool for most
 uses; everything below is detail and control.
 
+## Install (standalone Windows)
+
+Outside the Electron app, install is just **download → extract → run** — no
+installer, no admin rights, no PATH edits, and **Ghostscript is bundled** (nothing
+else to install):
+
+1. Download **`pdfprint-windows-amd64.zip`** from the repo's **Releases** page.
+2. Right-click it → **Extract All** → pick a folder (e.g. `C:\pdfprint`).
+3. Done. The folder holds `pdfprint.exe`, `stamp.exe`, and a `gs\` folder — keep
+   them together.
+
+Run it from a terminal opened in that folder (Shift+right-click the folder →
+*Open PowerShell window here*):
+
+```bat
+pdfprint.exe --list-printers
+pdfprint.exe --printer "<name or unique substring>" job.pdf
+```
+
+A first run may show two one-time prompts:
+- **"Windows protected your PC"** — the exe is unsigned; click **More info → Run
+  anyway**. (Code-signing would remove this.)
+- A **firewall prompt** on the first network print — **Allow** it (needed to reach
+  a network printer).
+
+Optional: add the folder to your PATH to run `pdfprint` from anywhere. The bundle
+includes Ghostscript unmodified under the AGPL-3.0 (`gs\GHOSTSCRIPT-*.txt`).
+
+*(The bare `pdfprint.exe` / `stamp.exe` are also published as separate Release
+assets — for the Electron app, or when Ghostscript is already present.)*
+
 ## How it works
 
 `pdfprint` replicates the CUPS pipeline on Windows:
@@ -320,12 +351,44 @@ execFile(path.join(bin, "pdfprint.exe"),
   (err, stdout, stderr) => { /* ... */ });
 ```
 
-**Binaries are built in CI, not committed.** A **GitHub Actions** workflow
-(`.github/workflows/release.yml`) builds `pdfprint.exe` / `stamp.exe` on a
-version tag and uploads them as **GitHub Release** assets (repo stays
-source-only). The Electron app pulls those assets (plus a vendored gs) into
-`resources/bin/` at package time; `electron-builder` publishes the packaged app,
-and `electron-updater` auto-updates installed clients.
+**Binaries are built in CI, not committed** — a **GitHub Actions** workflow
+([.github/workflows/release.yml](.github/workflows/release.yml)) produces the
+release artifacts on a version tag, so no Windows machine is needed to cut a
+release (you can do it from macOS/Linux).
+
+### Cutting a release
+
+```sh
+# 1. Make sure main is committed, tests pass, and it's pushed.
+make test && git push origin main
+
+# 2. Tag with a semver version — the workflow triggers on tags matching v*.
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Pushing the tag runs the workflow, which:
+
+1. runs the unit tests (the release is gated on them),
+2. cross-compiles `pdfprint.exe` / `stamp.exe` (windows/amd64) from Linux,
+3. downloads the official Windows Ghostscript and packages a self-contained
+   **`pdfprint-windows-amd64.zip`** — exes + bundled `gs\` + its AGPL
+   license/source (see [Install](#install-standalone-windows)),
+4. publishes all three (the two exes and the zip) as **GitHub Release assets**.
+
+**Verify:** the **Actions** tab shows the `release` run green, and the
+**Releases** page lists `pdfprint.exe`, `stamp.exe`, and
+`pdfprint-windows-amd64.zip`. Download the zip and confirm it runs.
+
+> The gs-bundling step runs for the first time on the first tag. If it fails, the
+> Actions log shows where (usually the gs download or the 7z/`find` paths). To
+> retry: **Re-run jobs** on the Actions tab, or delete and re-push the tag
+> (`git push --delete origin v0.1.0 && git tag -d v0.1.0`, then re-tag). The
+> publish step re-uploads assets with `--clobber`, so retries are safe.
+
+The Electron app pulls the bare `pdfprint.exe` / `stamp.exe` assets (plus a
+vendored gs) into `resources/bin/` at package time; `electron-builder` publishes
+the packaged app and `electron-updater` auto-updates clients.
 
 ## Status
 
@@ -356,5 +419,8 @@ not by linking `libgs` — so Ghostscript remains an independent work under its 
 license: **AGPL-3.0** (GNU Affero General Public License v3.0). If you distribute
 a build that **bundles** Ghostscript, that copy carries AGPL-3.0 obligations
 (make its source and license available, per the AGPL); alternatively, obtain a
-commercial Ghostscript license from Artifex. `pdfprint`'s own source is licensed
-separately — **_TODO: state pdfprint's license here._**
+commercial Ghostscript license from Artifex.
+
+`pdfprint`'s own source is licensed separately under the **MIT License** (see
+[LICENSE](LICENSE)) — exec'ing Ghostscript is mere aggregation, so gs's AGPL does
+not extend to pdfprint's code.
