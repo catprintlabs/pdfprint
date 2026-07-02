@@ -40,10 +40,12 @@ three items together — `pdfprint.exe`, `stamp.exe`, and `gs\`.
 Extracting does **not** put `pdfprint` on your PATH, so out of the box you run it
 from a terminal opened *in* that folder (Shift+right-click the folder → *Open
 PowerShell window here*). To type just `pdfprint` from anywhere, add the folder to
-your PATH once (no admin needed; reopen the terminal afterward):
+your PATH once (no admin needed; reopen the terminal afterward). **Replace
+`C:\pdfprint` with the folder you actually extracted to in step 2** — this is the
+folder that contains `pdfprint.exe`, not a fixed path:
 
 ```powershell
-setx PATH "$env:PATH;C:\pdfprint"
+setx PATH "$env:PATH;C:\pdfprint"   # <-- change C:\pdfprint to YOUR extract folder
 ```
 
 > Already have 64-bit Ghostscript installed, or want to use your own copy? The
