@@ -39,31 +39,12 @@ three items together — `pdfprint.exe`, `stamp.exe`, and `gs\`.
 
 Extracting does **not** put `pdfprint` on your PATH, so out of the box you run it
 from a terminal opened *in* that folder (Shift+right-click the folder → *Open
-PowerShell window here*).
-
-To type just `pdfprint` from anywhere, add the folder to your PATH once. In
-**PowerShell** (no admin needed), run this — replacing `C:\pdfprint` with the
-folder you actually extracted to:
+PowerShell window here*). To type just `pdfprint` from anywhere, add the folder to
+your PATH once (no admin needed; reopen the terminal afterward):
 
 ```powershell
-$dir = "C:\pdfprint"   # <-- your extract folder
-[Environment]::SetEnvironmentVariable(
-  "Path",
-  [Environment]::GetEnvironmentVariable("Path", "User") + ";$dir",
-  "User")
+setx PATH "$env:PATH;C:\pdfprint"
 ```
-
-Then **close and reopen your terminal** — the change only takes effect in new
-terminals. Verify with `pdfprint --list-printers`.
-
-> Prefer clicking? Press **Win**, type *Edit environment variables for your
-> account*, open it, select **Path → Edit → New**, paste your extract folder, and
-> **OK**. Same effect.
-
-> **Don't use `setx PATH "$env:PATH;..."`.** `$env:PATH` is your *combined*
-> user+system path, and `setx` truncates it at 1024 characters (silently corrupting
-> PATH) while copying the system entries into your user variable. The snippet above
-> appends only to your **user** Path, with no length limit.
 
 > Already have 64-bit Ghostscript installed, or want to use your own copy? The
 > bundled `gs\` is optional — see [Ghostscript](#ghostscript).
