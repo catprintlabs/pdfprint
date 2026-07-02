@@ -15,11 +15,21 @@ do the rasterizing at device resolution.
 
 `pdfprint` brings that same approach to Windows.
 
+## ⬇️ Download
+
+**[Download the latest Windows build →](https://github.com/catprintlabs/pdfprint/releases/latest/download/pdfprint-windows-amd64.zip)**
+(`pdfprint-windows-amd64.zip`) — extract and run; Ghostscript is bundled, so there's
+nothing else to install. Then see [Quick start](#quick-start).
+
+(Or browse [all releases](https://github.com/catprintlabs/pdfprint/releases/latest),
+including the bare `pdfprint.exe` / `stamp.exe`.)
+
 ## Quick start
 
 ### 1. Install
 
-1. Download **`pdfprint-windows-amd64.zip`** from the [Releases](../../releases) page.
+1. **[Download `pdfprint-windows-amd64.zip`](https://github.com/catprintlabs/pdfprint/releases/latest/download/pdfprint-windows-amd64.zip)**
+   (or pick it from the [Releases page](https://github.com/catprintlabs/pdfprint/releases/latest)).
 2. Right-click it → **Extract All** → pick a folder, e.g. `C:\pdfprint`.
 
 That's the whole install — no installer, no admin rights. Windows `.exe`s need no
@@ -194,7 +204,7 @@ PPD's `*PaperDimension`; without one it uses a built-in table (Letter, Legal, A4
 A3, Tabloid, Ledger, Executive, Statement). With no `--page-size`, gs uses the
 PDF's own MediaBox (still 1:1).
 
-You can also specify the page size in absolute dimensions:  i.e. 8.5x14in or 200
+You can also specify the page size in absolute dimensions:  i.e. `--page-size 8.5x14in` or `--page-size 210x297mm`
 
 ### Other options
 
@@ -347,7 +357,7 @@ git lfs install && git lfs pull
 
 ## Packaging & releasing
 
-`pdfprint` is a helper binary meant to be **bundled inside a larger Electron
+`pdfprint` is can be **bundled inside a larger app (i.e.Electron)
 app**, not installed on its own.
 
 **Ghostscript travels as a sibling.** The Windows gs build ROM-embeds its
