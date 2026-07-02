@@ -88,8 +88,9 @@ internal/pipeline orchestration: parse → build → run gs → stream to sink
 ```
 
 - **Device inference order**: explicit `--device` → `-sDEVICE=` in the PPD's
-  Foomatic command line → `cupsFilter`/model-name heuristics → error asking for
-  `--device`.
+  Foomatic command line → `cupsFilter`/model-name heuristics → default to
+  `pxlcolor` (`pxlmono` when `--color mono`), since PCL-XL is the most widely
+  supported laser language. (A PostScript-only printer needs `--device ps2write`.)
 - **Cross-platform build trick**: the spooler syscalls are behind
   `//go:build windows`; a `!windows` stub returns a helpful error. So the whole
   thing builds and *tests* on the Mac, and `--output <file>` captures the raw
@@ -147,6 +148,92 @@ geometry.
 Also added: Ghostscript auto-detection (the Windows installer usually skips
 PATH) and `--list-printers` (winspool `EnumPrinters`) so the exact `--printer`
 name is easy to get.
+
+## 8b. Windows transport: raw TCP vs the spooler (WSD/V4 silently drop RAW)
+
+The first Windows real-printer test (2026-07-01) exposed the deepest gotcha of
+the whole project. `pdfprint --printer "<name>"` reported success, the job left
+the queue — and **nothing printed**. Investigation:
+
+- The printer's queue was a **WSD port** with a **V4 print driver** (how modern
+  network printers install by default).
+- **WSD ports and V4 drivers silently discard the RAW datatype.** They force jobs
+  through the XPS/print-filter pipeline; raw PCL/PS is not passed to the device.
+  The spooler still returns success and drains the queue — a silent failure.
+- Proof it wasn't our bug: pausing the queue showed the full 166 KB spooled
+  correctly (so `WritePrinter` worked), yet the device rendered nothing. Sending
+  the *same bytes* to the device's raw TCP port (9100) printed perfectly.
+
+We considered the fixes and rejected the setup-heavy ones:
+
+| Option | Verdict | Why |
+|---|---|---|
+| Require users to hand-create a Standard TCP/IP (raw 9100) queue on a v3 driver | ❌ | Works (we proved it), but per-printer manual setup + a driver install — unacceptable for deployment (Mitch: "we can't be going adding new drivers"). |
+| Auto-create/tear-down a transient raw queue | ❌ | Needs admin, installs a driver, mutates system state. |
+| **Direct raw-TCP socket to port 9100 (AppSocket/JetDirect)** | ✅ **chosen** | Exactly what CUPS `socket://` / `lp -o raw` do. Zero OS setup: no port, queue, or driver. Bypasses the WSD/V4 pipeline entirely. |
+
+**Decision: for network printers, talk to the device directly over TCP 9100; keep
+the spooler only for local/USB queues.** Transport is chosen automatically
+(`spool.ResolvePrinter`): a WSD or Standard-TCP/IP port ⇒ resolve the device IP
+and use a socket; anything else ⇒ spooler. Overrides: `--host <ip>` (skip
+discovery), `--transport socket|spooler`.
+
+IP discovery is **registry-only** (no `golang.org/x/sys` dependency — hand-rolled
+advapi32 reads, matching the existing winspool syscalls):
+- Standard TCP/IP port → `…\Print\Monitors\Standard TCP/IP Port\Ports\<port>` →
+  `HostName` (+ `PortNumber` when `Protocol`=RAW).
+- WSD port → `…\Enum\SWD\PRINTENUM\*`, match `FriendlyName` = printer name, parse
+  the host from `LocationInformation` (`http://IP:port/…`). These keys grant
+  `BUILTIN\Users:ReadKey`, so discovery works non-elevated; the one ACL-restricted
+  spot (the `Properties\{DEVPKEY}` subkey) is deliberately not read.
+
+Graceful degradation: if discovery fails, `ResolvePrinter` returns an actionable
+error telling the user to pass `--host` — never a silent dead end (the very
+failure mode we were fixing).
+
+Lesson (companion to 8a's "trust the pixels"): on Windows, **"the spooler
+accepted it" does not mean "the printer got it."** Verify on paper, and treat
+WSD/V4 + RAW as a known dead end.
+
+## 8c. Self-documenting smoke tests (`stamp`)
+
+Because identical test pages (the PS vs PCL paths of the same ruler) are
+impossible to tell apart on paper, we added `cmd/stamp` + `internal/stamp`: it
+overlays a timestamp, host, the print command, and notes onto every page via a
+Ghostscript `EndPage` procedure (page geometry preserved — no scaling). The
+printed sheet now documents exactly what produced it. `make print-test` and
+`scripts/smoke-test.ps1` chain stamp → pdfprint into one command. This replaced
+hand-made static labeled fixtures (deleted).
+
+## 8d. Detecting the device instead of guessing it
+
+Once auto-routing worked, the open question was *which gs device* to use when the
+caller didn't say. A brief "default to `pxlcolor`" stopgap was rejected by
+Catmando: **detect, report, and never silently guess** — a wrong PDL prints
+garbage or nothing. So `internal/probe` asks the printer directly:
+
+- **IPP** (TCP 631, primary): a hand-rolled Get-Printer-Attributes call reads
+  `document-format-supported`, `color-supported`, `sides-supported`, and the
+  model. Richest source; 631 is open on the test fleet.
+- **SNMP** (UDP 161, fallback): walks the Printer MIB's
+  `prtInterpreterLangDescription` column plus `sysDescr`.
+
+Both are hand-rolled (no `golang.org/x/sys`, no SNMP/IPP lib) — same ethos as the
+registry/spooler syscalls. Mapping (`Caps.SuggestDevice`): PCL advertised →
+`pxlcolor`/`pxlmono` (prefer native PCL-XL; generic `application/vnd.hp-PCL`
+counts as PCL-XL, since PCL5-only IPP printers are extinct), else PostScript →
+`ps2write`, explicit-PCL5-only → `ljet4`. Resolution order: `--device` → PPD →
+probe → **error** (never assume). Verified against the real C620 over IPP (reads
+its full capability set and picks `pxlcolor`); inspect with `--probe`.
+
+Two smaller companions landed with it:
+- **Verbosity**: `--quiet`/`-q` (errors only), normal (progress + detection), `-v`
+  (gs command, gs path, PPD, probe detail). `--dry-run` shows the resolved device
+  + command + transport with no side effects.
+- **Partial printer names**: `--printer` accepts any substring that *uniquely*
+  identifies one installed printer (exact match wins); ambiguous or absent
+  matches error with the candidates. So `--printer "(FC:82:A2)"` selects one of
+  five identically-named C620s.
 
 ## 9. How to pick up from here
 

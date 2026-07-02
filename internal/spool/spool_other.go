@@ -15,3 +15,9 @@ func Open(job Job) (Writer, error) {
 func ListPrinters() ([]string, error) {
 	return nil, fmt.Errorf("--list-printers is only available on Windows")
 }
+
+// ResolvePrinter is Windows-only (it inspects the Windows spooler/registry).
+// Off Windows there are no named queues to discover; callers use --host/--output.
+func ResolvePrinter(name string) (PrinterRoute, error) {
+	return PrinterRoute{}, fmt.Errorf("resolving a printer by name is only available on Windows; use --host <ip> or --output")
+}

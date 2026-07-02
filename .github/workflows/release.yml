@@ -1,0 +1,53 @@
+name: release
+
+# Build the Windows binaries on a version tag and publish them as GitHub Release
+# assets. The repo stays source-only; the Electron app consumes these assets
+# (plus a vendored Ghostscript) at package time.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # required to create the Release and upload assets
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      # Unit tests are pure Go (no gs/printer/LFS needed) — gate the release on them.
+      - name: Test
+        run: go test ./...
+
+      # Pure-Go (no cgo): cross-compile the Windows binaries from Linux.
+      - name: Build windows/amd64
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w" -o dist/pdfprint.exe ./cmd/pdfprint
+          go build -trimpath -ldflags "-s -w" -o dist/stamp.exe    ./cmd/stamp
+          ls -l dist
+
+      # Create the Release (if needed) and upload the assets via the gh CLI —
+      # no third-party actions, uses the built-in token.
+      - name: Publish Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/pdfprint.exe dist/stamp.exe \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            || gh release upload "${GITHUB_REF_NAME}" \
+                 dist/pdfprint.exe dist/stamp.exe --clobber

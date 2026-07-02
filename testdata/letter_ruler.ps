@@ -1,0 +1,115 @@
+%!PS-Adobe-3.0
+%%Title: pdfprint no-scaling test — 8.5x11 (Letter), full bleed, 1-inch ticks
+%%BoundingBox: 0 0 612 792
+%%EndComments
+%
+% Purpose: verify NO SCALING on a real printer.
+%   - Page is exactly 8.5 x 11 in (612 x 792 pt).
+%   - Tick marks run from the middle of each edge toward the center along the
+%     two centerlines, spaced every 1.0 inch (72 pt) and labeled in inches
+%     measured from the CENTER (center is always printable, edges may clip).
+%   - If printing is 1:1, any adjacent tick gap measures exactly 1.00 inch with
+%     a ruler, and the "N" tick sits exactly N inches from the center crosshair.
+%   - Edge frames at 0", 0.25" and 0.5" show how much the printer clips.
+%
+<< /PageSize [612 792] >> setpagedevice
+
+/in { 72 mul } def
+/cx 306 def          % center x (8.5in/2 = 4.25in)
+/cy 396 def          % center y (11in/2  = 5.50in)
+/Helvetica findfont 9 scalefont setfont
+
+% ---- edge frames (full bleed test): 0", 0.25", 0.5" insets ----
+/frame {              % inset -> draw rectangle at that inset from the edge
+  /d exch def
+  newpath
+  d d moveto
+  612 d sub d lineto
+  612 d sub 792 d sub lineto
+  d 792 d sub lineto
+  closepath stroke
+} def
+0 setgray
+2 setlinewidth 0  frame          % right at the paper edge (expect clipping)
+1 setlinewidth 18 frame          % 0.25 in
+0.5 setlinewidth 36 frame        % 0.50 in
+
+% ---- centerlines (the "plus" spanning the whole page) ----
+0.75 setlinewidth
+newpath cx 0 moveto cx 792 lineto stroke       % vertical, top+bottom edge mids
+newpath 0 cy moveto 612 cy lineto stroke       % horizontal, left+right edge mids
+
+% ---- helper: horizontal tick across the vertical centerline at height y ----
+/vtick {              % y len -> tick
+  /len exch def /y exch def
+  cx len sub y moveto cx len add y lineto stroke
+} def
+% ---- helper: vertical tick across the horizontal centerline at x ----
+/htick {              % x len -> tick
+  /len exch def /x exch def
+  x cy len sub moveto x cy len add lineto stroke
+} def
+/label { moveto show } def        % (str) x y label
+
+0.75 setlinewidth
+
+% Vertical centerline: inch ticks 1..5 above and below center (5.5in reaches edge)
+1 1 5 {
+  /i exch def
+  /up cy i in add def
+  /dn cy i in sub def
+  up 10 vtick
+  dn 10 vtick
+  i 3 string cvs dup cx 14 add up 3 sub label
+  cx 14 add dn 3 sub label
+} for
+% top/bottom edges at 5.5 in
+cy 5.5 in add 10 vtick
+cy 5.5 in sub 10 vtick
+
+% Horizontal centerline: inch ticks 1..4 left and right of center
+1 1 4 {
+  /i exch def
+  /rt cx i in add def
+  /lf cx i in sub def
+  rt 10 htick
+  lf 10 htick
+  i 3 string cvs dup rt 4 sub cy 14 add label
+  lf 4 sub cy 14 add label
+} for
+% right/left edges at 4.25 in
+cx 4.25 in add 10 htick
+cx 4.25 in sub 10 htick
+
+% ---- center crosshair + label ----
+1.2 setlinewidth
+cy 16 vtick        % horizontal stroke of the crosshair, at the center height
+cx 16 htick        % vertical stroke of the crosshair, at the center x
+/Helvetica-Bold findfont 10 scalefont setfont
+(CENTER 0) cx 8 add cy 20 add label
+
+% ---- title / instructions (kept well inside the printable area) ----
+/Helvetica-Bold findfont 12 scalefont setfont
+(pdfprint NO-SCALING TEST) cx 90 sub cy 120 add label
+/Helvetica findfont 10 scalefont setfont
+(Page = 8.5 x 11 in \(Letter\).) cx 90 sub cy 104 add label
+(Ticks every 1.0 in; labels = inches from CENTER.) cx 90 sub cy 90 add label
+(If 1:1, center-to-tick N measures exactly N inches.) cx 90 sub cy 76 add label
+
+% ---- edge-mid callouts pointing inward (the literal "from each edge" marks) ----
+/Helvetica-Bold findfont 9 scalefont setfont
+3 setlinewidth
+% bottom edge mid -> inward
+newpath cx 0 moveto cx 40 lineto stroke
+(BOTTOM EDGE MID) cx 8 add 30 label
+% top edge mid -> inward
+newpath cx 792 moveto cx 752 lineto stroke
+(TOP EDGE MID) cx 8 add 756 label
+% left edge mid -> inward
+newpath 0 cy moveto 40 cy lineto stroke
+(LEFT) 44 cy 6 add label
+% right edge mid -> inward
+newpath 612 cy moveto 572 cy lineto stroke
+(RIGHT) 540 cy 6 add label
+
+showpage

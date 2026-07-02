@@ -1,8 +1,14 @@
-# Build artifacts
+# Build artifacts — binaries are built in CI and published to GitHub Releases
+# (see .github/workflows/release.yml), never committed.
 /pdfprint
 /pdfprint.exe
+/stamp
+/stamp.exe
 /dist/
 *.out
+
+# Vendored Ghostscript for bundling (regenerate with scripts/vendor-gs.ps1)
+/vendor/
 
 # OS junk
 .DS_Store

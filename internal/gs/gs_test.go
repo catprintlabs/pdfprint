@@ -92,8 +92,36 @@ func TestCopiesAndDuplex(t *testing.T) {
 }
 
 func TestNoDeviceIsError(t *testing.T) {
+	// No --device, no PPD, and (at this layer) no detection: must NOT guess.
 	if _, err := Build(nil, Options{InputPath: "job.pdf"}); err == nil {
-		t.Fatal("expected error when no device can be determined")
+		t.Fatal("expected error when no device can be determined (no assumptions)")
+	}
+}
+
+func TestCustomPageSize(t *testing.T) {
+	cases := []struct {
+		in   string
+		w, h int
+	}{
+		{"612x792", 612, 792},      // bare = points
+		{"8.5x11in", 612, 792},     // inches -> Letter
+		{"8.5x14in", 612, 1008},    // inches -> Legal
+		{"216x279mm", 612, 791},    // mm -> ~Letter
+		{"21x29.7cm", 595, 842},    // cm -> ~A4
+		{"612 x 792 pt", 612, 792}, // spaces + explicit unit
+	}
+	for _, c := range cases {
+		if w, h, ok := resolvePageDims(nil, c.in); !ok || w != c.w || h != c.h {
+			t.Errorf("resolvePageDims(%q) = %d,%d ok=%v; want %d,%d", c.in, w, h, ok, c.w, c.h)
+		}
+	}
+	// A keyword must still resolve via the table, not as a custom size.
+	if w, h, ok := resolvePageDims(nil, "Legal"); !ok || w != 612 || h != 1008 {
+		t.Errorf("Legal = %d,%d ok=%v; want 612,1008", w, h, ok)
+	}
+	// Not a size at all.
+	if _, _, ok := resolvePageDims(nil, "bogus"); ok {
+		t.Error("bogus should not parse as a custom size")
 	}
 }
 

@@ -41,6 +41,8 @@ type Command struct {
 	Binary string
 	Args   []string // arguments (not including Binary)
 	Device string   // the device that was selected
+	MediaW int      // resolved media width in points (0 = using the PDF's own size)
+	MediaH int      // resolved media height in points
 }
 
 // String renders the command for logging / --dry-run.
@@ -87,7 +89,10 @@ func Build(p *ppd.PPD, o Options) (Command, error) {
 		device = InferDevice(p)
 	}
 	if device == "" {
-		return Command{}, fmt.Errorf("could not determine Ghostscript device from PPD; pass --device (e.g. pxlcolor, pxlmono, ljet4, ps2write)")
+		// No device given, none in a PPD, and the caller (pipeline) couldn't
+		// detect one from the printer. We do NOT guess — a wrong PDL prints
+		// garbage or nothing. The caller should have produced a clearer message.
+		return Command{}, fmt.Errorf("no output device: pass --device (pxlcolor, pxlmono, ljet4, ps2write) or use a printer/PPD that advertises one")
 	}
 
 	res := o.Resolution
@@ -132,12 +137,14 @@ func Build(p *ppd.PPD, o Options) (Command, error) {
 	// lock it with -dFIXEDMEDIA. This is the only reliable way to force exact
 	// media: a `-c setpagedevice` after -dFIXEDMEDIA is ignored, and without
 	// fixing the size gs would default to Letter.
+	var mediaW, mediaH int
 	if w, h, ok := resolvePageDims(p, o.PageSize); ok {
 		args = append(args,
 			fmt.Sprintf("-dDEVICEWIDTHPOINTS=%d", w),
 			fmt.Sprintf("-dDEVICEHEIGHTPOINTS=%d", h),
 			"-dFIXEDMEDIA",
 		)
+		mediaW, mediaH = w, h
 	}
 	// Scaling policy. Default (Fit=false) is strict 1:1, no scaling — oversized
 	// content clips rather than scales. With Fit, gs scales pages to the media.
@@ -163,7 +170,7 @@ func Build(p *ppd.PPD, o Options) (Command, error) {
 		args = append(args, input)
 	}
 
-	return Command{Binary: bin, Args: args, Device: device}, nil
+	return Command{Binary: bin, Args: args, Device: device, MediaW: mediaW, MediaH: mediaH}, nil
 }
 
 // knownSizes maps common media keywords to their PostScript point dimensions,
@@ -184,12 +191,47 @@ var knownSizes = map[string][2]int{
 // e.g. "<</PageSize[612 1008]...>>" -> 612, 1008.
 var dimsRe = regexp.MustCompile(`\[\s*([0-9.]+)\s+([0-9.]+)`)
 
+// customSizeRe matches an explicit "WxH" media size with an optional unit,
+// e.g. "612x792", "8.5x11in", "216x279mm". Default unit is points.
+var customSizeRe = regexp.MustCompile(`(?i)^\s*([0-9]*\.?[0-9]+)\s*[x×]\s*([0-9]*\.?[0-9]+)\s*(pt|in|mm|cm)?\s*$`)
+
+// parseCustomSize parses an explicit media size into points. ok=false if the
+// string isn't a WxH size (so a keyword like "Legal" falls through to the table).
+func parseCustomSize(s string) (w, h int, ok bool) {
+	m := customSizeRe.FindStringSubmatch(s)
+	if m == nil {
+		return 0, 0, false
+	}
+	wf, _ := strconv.ParseFloat(m[1], 64)
+	hf, _ := strconv.ParseFloat(m[2], 64)
+	scale := 1.0 // points
+	switch strings.ToLower(m[3]) {
+	case "in":
+		scale = 72
+	case "mm":
+		scale = 72.0 / 25.4
+	case "cm":
+		scale = 72.0 / 2.54
+	}
+	w = int(wf*scale + 0.5)
+	h = int(hf*scale + 0.5)
+	if w <= 0 || h <= 0 {
+		return 0, 0, false
+	}
+	return w, h, true
+}
+
 // resolvePageDims resolves the target media size in points. It prefers, in
-// order: the PPD's *PaperDimension for the keyword, the numbers embedded in the
-// PPD PageSize choice code, then the built-in size table. When key is empty it
-// uses the PPD's default PageSize. Returns ok=false if nothing matches (in which
-// case gs falls back to the PDF's own MediaBox — still no scaling).
+// order: an explicit "WxH" size, the PPD's *PaperDimension for the keyword, the
+// numbers embedded in the PPD PageSize choice code, then the built-in size table.
+// When key is empty it uses the PPD's default PageSize. Returns ok=false if
+// nothing matches (in which case gs falls back to the PDF's own MediaBox — still
+// no scaling).
 func resolvePageDims(p *ppd.PPD, key string) (w, h int, ok bool) {
+	// An explicit "WxH[unit]" size wins over everything.
+	if w, h, ok := parseCustomSize(key); ok {
+		return w, h, true
+	}
 	if p != nil {
 		if key == "" {
 			if opt := p.Option("PageSize"); opt != nil {

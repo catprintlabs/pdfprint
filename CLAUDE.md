@@ -5,46 +5,11 @@ whoever pulls it — including on a different machine/OS — starts with the sam
 picture. See `docs/DESIGN.md` for the *why* (architecture & decision log); this
 file is the *where we are & what's next*.
 
-## Status flash (2026-07-02)
-Windows real-printer testing/debugging is **in progress on a Windows PC and
-reported "almost ready"** by Mitch. That work was **not yet pushed** as of this
-note — it lives on the PC. **Next session: `git fetch` first**; the PC changes
-(the `--printer` RAW-spooler path finally exercised on real hardware) should be
-committed and pushed *from the PC*. If they aren't on `origin/main` yet, they're
-still only on that machine. Everything below reflects the last macOS-side state.
-
-## ⚠️ TODO — release-process check (for the Claude session doing this merge)
-Mitch built/tested `pdfprint.exe` on the PC and a prior PC-side session may have
-set up a GitHub Release — but **possibly did it via Git LFS / by committing the
-exe**, which is wrong. Before finishing, verify and correct the release process:
-
-1. **The Windows `.exe` must ship as a GitHub *Release asset*, NOT in the repo
-   and NOT via Git LFS.** Check for mistakes:
-   - Did any session run `git lfs track "*.exe"`? Inspect `.gitattributes` — if
-     there's an `*.exe`/`pdfprint.exe` LFS rule, **remove it**.
-   - Did a `pdfprint.exe` get committed (directly or as an LFS pointer)?
-     `git log --all --oneline -- '*.exe'` and `git ls-files '*.exe'`. If so,
-     remove it from the tree (and history if needed) and confirm `.gitignore`
-     still ignores `/pdfprint.exe`.
-2. **Correct way to publish the build:**
-   ```sh
-   go build -o pdfprint.exe ./cmd/pdfprint    # or: make windows
-   gh release create vX.Y.Z pdfprint.exe \
-     --title "pdfprint vX.Y.Z" --notes "Windows build; PDF->gs->PCL/PS->RAW spooler, 1:1."
-   ```
-   Then verify the asset downloads from the repo's Releases page. Tag the commit
-   the build came from.
-3. **Why:** binaries in Git/LFS bloat the repo and consume LFS storage/bandwidth;
-   Releases are the right channel and give a stable versioned download URL. Only
-   source + fixtures belong in the repo (fixtures are the *only* LFS use — see
-   `.gitattributes`, which should list `testdata/*.pdf` and nothing else).
-
-Delete this TODO once the release process is confirmed correct.
-
 ## What this tool is (one line)
 `pdfprint` gives Windows the PDF print path it lacks: PDF → Ghostscript → the
-printer's native language (PCL-XL / PostScript) → RAW spooler, at 1:1 with no
-scaling. macOS/Linux is the dev/test host; Windows is the real target.
+printer's native language (PCL-XL / PostScript) → the device (raw TCP for network
+printers, RAW spooler for local/USB), at 1:1 with no scaling. macOS/Linux is the
+dev/test host; Windows is the real target.
 
 ## Verified so far (as of 2026-07-01, on macOS)
 End-to-end pipeline proven on a real **Xerox VersaLink C620** (Legal loaded),
@@ -53,26 +18,40 @@ printing via `pdfprint --output - | lp -o raw` (raw bypasses the CUPS driver):
 | Fixture | PostScript (`ps2write`) | PCL-XL |
 |---------|-------------------------|--------|
 | `testdata/legal_ruler.pdf` (vector no-scaling ruler) | ✅ 171 KB | ✅ `pxlmono` 19 KB |
-| color imposition ticket (~12 MB, see note) | ✅ 6.6 MB | ✅ `pxlcolor` 11.7 MB |
+| real color imposition ticket (~12 MB, see note) | ✅ 6.6 MB | ✅ `pxlcolor` 11.7 MB |
 
 > The color/raster path was first verified with a real production ticket that was
-> **removed from the repo and its history for containing customer PII** (a
-> repo-delete+recreate purged the leaked LFS object). The committed fixture is now
-> the **sanitized** `testdata/W260701_1546917_ticket.pdf` (customer "Internal
-> Proof", no personal data) — the size figures above are from the original run.
+> **removed from the repo and its history for containing customer PII** (a repo
+> delete+recreate purged the leaked LFS object). The committed fixture is now the
+> **sanitized** `testdata/W260701_1546917_ticket.pdf` (customer "Internal Proof",
+> no personal data) — the size figures above are from the original run.
 
 - **1:1 confirmed**: on the ruler print, tick N measures exactly N inches from
   the center crosshair; PCL-XL and PostScript output were visually identical.
 - Size inversion worth remembering: PCL-XL is far *smaller* than PS for vector
   pages (ruler) but *larger* for rasterized image pages (the ticket).
 
+### Windows (2026-07-01) — the real target, now verified ✅
+The Windows path (the whole reason this tool exists) is proven end-to-end on the
+same Xerox VersaLink C620. `pdfprint --printer "<name>"` prints `legal_ruler.pdf`
+at 1:1 via both `ps2write` and `pxlmono`, using the printer's **existing WSD
+queue** — the tool auto-discovers the device IP and streams over raw TCP. Output
+matches the macOS runs in size (PS ~166 KB, PCL-XL ~19 KB), confirmed on paper.
+
+Dev box for Windows testing: Go 1.26.x and Ghostscript 10.07.1 installed (gs at
+`C:\Program Files\gs\gs10.07.1\bin\gswin64c.exe`, auto-detected). The C620 fleet
+is WSD; the unit tested is "Xerox VersaLink C620 (FC:90:A7)" at **10.0.1.151**
+(raw port 9100 open).
+
 ## Test fixtures (`testdata/`, PDFs via Git LFS)
 - `legal_ruler.pdf` / `legal_ruler.ps` — the **no-scaling test page**. 8.5×14"
   Legal (612×1008 pt), 1-inch ticks labeled in inches from center, edge frames
   at 0"/0.25"/0.5", center crosshair. `.ps` is the source; `.pdf` is what we print.
+- `letter_ruler.pdf` / `letter_ruler.ps` — the **Letter** (8.5×11", 612×792 pt)
+  variant of the ruler, same structure as the Legal one.
 - `W260701_1546917_ticket.pdf` — a **sanitized** imposition ticket (612×1008
   Legal, ImageMagick raster, ~12 MB; customer "Internal Proof", no PII). The
-  real-workload color fixture. Replaced an earlier PII-bearing ticket.
+  real-workload color fixture; replaced an earlier PII-bearing ticket.
 - `hello.pdf` — small Letter fixture (gitignored; regenerate with `make fixture`).
 
 ## How to run the smoke test
@@ -83,60 +62,173 @@ pdfprint --scale none --device pxlcolor --page-size Legal --output - <pdf> | lp 
 ```
 Find the queue with `lpstat -e`; confirm delivery with `lpstat -o <queue>` (empty = sent).
 The C620 queue used for testing was `Xerox_VersaLink_C620__FC_90_A7_` (Mac only;
-the Windows spooler uses the printer's display name instead).
+Windows uses the printer's display name instead).
 
-## >>> Continuing on Windows (the next milestone) <<<
-The whole point of the tool is the **Windows RAW spooler path** (`--printer`),
-which cannot be exercised on macOS. On the PC:
+**Self-documenting smoke test** (`cmd/stamp` + `internal/stamp`): `stamp` overlays
+a timestamp, host, the print command, and notes onto a PDF via gs, so the printed
+page records what produced it (and disambiguates identical test pages — this is
+why the old static `legal_ruler_PS/PCL.pdf` variants were deleted). One-liners:
+```bat
+:: Windows (no make): stamps then prints, auto-routing the WSD queue to raw TCP
+powershell -File scripts\smoke-test.ps1 -Printer "Xerox VersaLink C620 (FC:90:A7)"
+powershell -File scripts\smoke-test.ps1 -HostIp 10.0.1.151
+```
+```sh
+make print-test HOST=10.0.1.151          # Unix host (raw TCP is cross-platform)
+make print-test PRINTER="<name>"         # (Windows-with-make)
+```
 
+## Transport: how bytes reach the printer (the big Windows lesson)
+Getting gs output *to the device* is the Windows-specific, non-obvious part.
+`pdfprint` chooses the transport automatically (`--transport auto`, default) from
+the named printer — implemented in `spool.ResolvePrinter` (`internal/spool`):
+
+- **Network printer → direct raw TCP, port 9100** (AppSocket/JetDirect). Opens a
+  socket and streams PCL/PS — the analog of CUPS `socket://` / `lp -o raw`.
+  **No OS setup: no port, no queue, no driver.** IP is discovered from the queue
+  you already have: a Standard TCP/IP port's `HostName` (registry), or a **WSD**
+  queue's PnP `LocationInformation` (registry: `…\Enum\SWD\PRINTENUM\*`, matched
+  by `FriendlyName`, IP parsed from the `http://IP:port/…` URL).
+- **Local/USB → Windows RAW spooler** (`WritePrinter`, `RAW` datatype).
+
+**DON'T REGRESS THIS — why the spooler isn't used for network printers:**
+spooling the RAW datatype to a **WSD port** or a **V4 driver** *silently fails* —
+the spooler reports success, the job drains from the queue, and the device prints
+**nothing** (WSD/V4 force jobs through the XPS/print-filter pipeline, which
+discards raw PCL/PS). Proven cleanly: a *paused* queue held the full 166 KB (so
+`pdfprint` wrote it correctly), yet nothing rendered; the identical bytes sent to
+the device's raw 9100 socket printed perfectly. Most network printers install as
+WSD by default, so socket-9100 is the right default for them.
+
+Overrides: `--host <ip>` (+ `--port`, default 9100) dials directly, no discovery,
+any OS; `--transport socket|spooler` forces a path. `--dry-run` prints the chosen
+transport without printing anything (safe, no dial/spool):
+```
+output: printer "Xerox VersaLink C620 (FC:90:A7)" via socket 10.0.1.151:9100
+        (WSD port "WSD-..." -> raw TCP 10.0.1.151:9100)
+```
+Discovery note: the registry keys read are `Users:ReadKey` (verified), so it works
+**non-elevated**. If a read ever fails, `ResolvePrinter` returns an actionable
+error pointing at `--host` (no silent dead end). We deliberately avoided a
+`golang.org/x/sys` dep — registry reads are hand-rolled advapi32 syscalls in
+`spool_windows.go`, matching the existing hand-rolled winspool code.
+
+## Device auto-detection (don't guess the PDL)
+Choosing the gs device (`internal/probe`, added 2026-07-02). Order: explicit
+`--device` → PPD (`InferDevice`) → **probe the printer** → **refuse** (never guess
+— a wrong PDL prints garbage/nothing; this reversed an earlier "default to
+pxlcolor" stopgap).
+- **IPP** (TCP 631, primary): hand-rolled Get-Printer-Attributes →
+  `document-format-supported`, `color-supported`, `sides-supported`, model.
+  **SNMP** (UDP 161, fallback): walks `prtInterpreterLangDescription`
+  (`.1.3.6.1.2.1.43.15.1.1.5`) + sysDescr. Both hand-rolled, no deps.
+- **Mapping** (`Caps.SuggestDevice`): PCL advertised → `pxlcolor`/`pxlmono`
+  (prefer native PCL-XL; generic `vnd.hp-PCL` counts as PCL-XL — PCL5-only IPP
+  printers are extinct); else PostScript → `ps2write`; explicit PCL5-only →
+  `ljet4`. `--color` overrides color/mono.
+- Always **reports** what it detected + chose; on failure, errors telling the
+  user to pass `--device`. Inspect with `pdfprint --probe --host <ip>` (or
+  `--printer <name>`). Verified on the real C620 via IPP (picks `pxlcolor`).
+
+## Paper size & the media check
+- `--page-size` takes a keyword (Letter/Legal/A4/A3/Tabloid/Ledger/Executive/
+  Statement or a PPD name) **or exact dimensions**: `8.5x11in`, `216x279mm`,
+  `21x29.7cm`, or bare points `612x792` (`gs.parseCustomSize`). No `--page-size`
+  → gs uses the PDF's own MediaBox (still 1:1), and `pipeline.readPDFSize` reads
+  that MediaBox (best-effort regex, cleartext) just to report/compare it.
+- The resolved job size is always printed (`page size: 8.5x14 in (612x1008 pt)`,
+  with `, from PDF` when read from the file), and the
+  IPP probe reads the printer's **loaded** media (`media-ready`). On mismatch we
+  print a **non-fatal WARNING** ("printer has X loaded, but this job is Y — load
+  matching paper…") — Catmando's call: warn, never fail (loading paper is a
+  physical step). The warning bypasses `--quiet` (it affects the physical output).
+  `probe.MediaLoaded` compares within ~5pt, orientation-independent.
+
+## Verbosity
+`--quiet`/`-q` (errors only) · normal (progress + detection summary) · `-v`
+(adds gs command, gs path, PPD, probe detail). `--dry-run` shows the resolved
+device + gs command + transport with no side effects (the probe is a read).
+
+## Partial printer names
+`--printer` accepts any substring that **uniquely** identifies one installed
+printer (exact name wins over substrings); ambiguous/absent → error listing the
+candidates. E.g. `--printer "(FC:82:A2)"` picks one of five identically-named
+C620s. Implemented in `spool.matchName` (pure/tested) via `spool.MatchPrinter`,
+applied in `pipeline.Run` and `--probe`. The 5 C620s are distinct units on
+distinct IPs (FC:90:A7=.151, FC:82:A2=.153, …), each auto-discovered.
+
+## How to run on Windows (fresh machine)
 1. **Install Git LFS _before_ cloning** (or `git lfs install && git lfs pull`
-   after) — else the `testdata/*.pdf` fixtures come down as pointer files, not
-   PDFs. Git for Windows bundles git-lfs; else `winget install GitHub.GitLFS`.
-2. **Install Ghostscript (64-bit)** from https://ghostscript.com/releases/ —
-   `pdfprint` auto-detects `C:\Program Files\gs\gs*\bin\gswin64c.exe`.
-3. **Build**: `go build -o pdfprint.exe ./cmd/pdfprint` (or `make windows` from a
-   Unix host cross-compiles `pdfprint.exe`). Needs Go 1.22+.
-4. **Get the exact printer name**: `pdfprint.exe --list-printers`.
-5. **Print** the same fixtures 1:1 and compare to the macOS output:
+   after) — else `testdata/*.pdf` come down as pointer files. `winget install GitHub.GitLFS`.
+2. **Install Ghostscript (64-bit)** — auto-detected at `C:\Program Files\gs\gs*\bin\gswin64c.exe`.
+   winget has no official Artifex pkg; grab the installer from the Artifex GitHub
+   releases (`ghostpdl-downloads`) and run `/S` (silent), or from ghostscript.com.
+3. **Install Go 1.22+** (`winget install GoLang.Go`). Build isn't required to run —
+   `go run ./cmd/pdfprint …` works; `go build -o pdfprint.exe ./cmd/pdfprint` for a binary.
+4. **Print** using the printer name you already have (no setup):
    ```bat
-   pdfprint.exe --scale none --device pxlmono  --page-size Legal --printer "<exact name>" testdata\legal_ruler.pdf
-   pdfprint.exe --scale none --device pxlcolor --page-size Legal --printer "<exact name>" testdata\W260701_1546917_ticket.pdf
+   pdfprint.exe --scale none --device pxlmono --page-size Legal --printer "<name>" testdata\legal_ruler.pdf
    ```
-6. **Watch for**: the RAW spooler path actually reaching the printer; output
-   matching the macOS prints; the no-scaling guarantee holding (ruler ticks =
-   exactly 1"). Add `--dry-run` first to inspect the gs command.
+   `--list-printers` shows exact names; `--dry-run` shows the resolved transport first.
 
 ## No-scaling: how it's enforced (don't regress this)
 gs args: `-dDEVICEWIDTHPOINTS/-dDEVICEHEIGHTPOINTS` (exact media in points) +
 `-dFIXEDMEDIA` (lock it) + `-dPDFFitPage=false` (place 1:1, oversized clips
 rather than shrinks). A `-c setpagedevice` *after* `-dFIXEDMEDIA` is ignored, so
-media must be set at device-init via those flags. **Gotcha:** the `--ppd` path
-defaults media to the PPD's default (often Letter, 792 pt height) and would clip
-a Legal page — always pass `--page-size Legal` (works with or without a PPD).
+media must be set at device-init via those flags. **This must always be set** —
+without it gs falls back to its Letter default for the device, so a Legal PDF
+prints as Letter and the printer waits for the wrong paper. Precedence:
+`--page-size` (keyword or `WxH`) → the PDF's own MediaBox (`readPDFSize`, auto) →
+PPD default. So a Legal PDF now auto-detects as Legal; you no longer need to pass
+`--page-size Legal` manually (though it still works, and overrides).
 
 ## Tests: what's automated vs. manual
 - **Automated** (`make test`, no external deps): unit tests over PPD parsing
-  (`internal/ppd`) and gs *command construction* (`internal/gs`) — they assert
-  the right gs args are built (fixed media, no-scaling, device inference, etc.).
+  (`internal/ppd`), gs *command construction* (`internal/gs`), and the stamp
+  prolog/PS-escaping (`internal/stamp`) — they assert the right args/output are
+  built (fixed media, no-scaling, device inference, EndPage overlay, etc.).
 - **NOT yet automated**: actually running gs on a PDF and asserting the rendered
   output is exactly 612×1008 with valid PCL/PS magic bytes. This end-to-end
   regression guard is the main test gap — proposed as a `make test-integration`
   target gated on gs being present. The physical print is unavoidably manual.
 
+## Distribution (Electron app + CI releases)
+`pdfprint` is a **helper binary bundled inside a larger Electron app**, not
+installed standalone. Decisions made 2026-07-02:
+- **Ghostscript ships as a sibling.** Only 2 files needed (`gswin64c.exe` +
+  `gsdll64.dll`, ~24 MB — resources are ROM'd into the DLL). `scripts/vendor-gs.ps1`
+  assembles them into `vendor/` (gitignored). `gs.FindBinary` prefers a gs next to
+  the exe (`<exedir>\gs\gswin64c.exe`) over the system one; `--gs` overrides all.
+- **Electron packaging** puts `pdfprint.exe` + `stamp.exe` + `gs/` in
+  `extraResources`; the main process spawns them from `process.resourcesPath`
+  (passing `--gs` or relying on sibling detection). See README "Distribution".
+- **Binaries are NOT committed.** `.github/workflows/release.yml` builds the
+  Windows exes on a `v*` tag (pure-Go cross-compile from Linux, gated on
+  `go test`) and uploads them as **GitHub Release assets** via the `gh` CLI. The
+  Electron app pulls those assets at package time; `electron-builder` publishes the
+  app and `electron-updater` auto-updates clients. (We briefly committed exes via
+  LFS, then reverted to this source-only + Releases model.)
+- `scripts/build.ps1` is for local Windows dev builds only.
+
 ## Open threads / next steps
 - (Proposed) integration test: run `pdfprint --output` on `legal_ruler.pdf`,
   rasterize, assert 612×1008 + PCL/PS magic — turns today's manual check into CI.
-- (Proposed) `make print-test PRINTER=<queue>` convenience target.
-- Windows real-printer verification (section above).
-- **Experimental Crystal port** on branch `crystal-port` (not merged). A learning
-  reimplementation under `crystal/`. Phase 1 done: PPD parser + gs command builder
-  ported, `crystal spec` green (11 examples), emits a byte-identical gs command to
-  the Go tool. Phases 2 (Process/CLI) & 3 (winspool.drv FFI via `lib`/`fun`)
-  pending — see `crystal/README.md` on that branch. Needs Crystal 1.20+ (`brew
-  install crystal`). The Go tool on `main` is unaffected.
+- ✅ Windows real-printer verification (done — see "Verified so far / Windows").
+- ✅ `make print-test` + `scripts/smoke-test.ps1` convenience targets (done).
+- ✅ Transport auto-routing (WSD/V4 → raw TCP) with IP discovery (done).
+- PII-free dummy imposition ticket fixture (still pending — the color/raster path
+  was verified once on a real ticket that was removed for PII).
 - Longer-term (see `docs/DESIGN.md` "Not yet done"): full Foomatic option
   substitution, auto-locating a printer's PPD, UIConstraints, tray selection, N-up.
+- Possible polish: LPR (515) fallback if a device has 9100 closed; IPv6 hosts in
+  discovery; a `--transport` value to prefer spooler-over-socket for TCP/IP queues.
 
 ## Housekeeping
-- PDF fixtures are Git LFS (`testdata/*.pdf`, see `.gitattributes`).
+- PDF fixtures are Git LFS (`testdata/*.pdf`, see `.gitattributes`). The Windows
+  `.exe`s are NOT committed — they build in CI and ship as GitHub Release assets
+  (`.github/workflows/release.yml`); `.gitignore` ignores them.
 - Regenerable outputs are gitignored: `testdata/*.out.*`, `testdata/*.proof.png`.
+- **Experimental Crystal port** on branch `crystal-port` (not merged). A learning
+  reimplementation under `crystal/`: Phase 1 done (PPD parser + gs command builder,
+  `crystal spec` green, byte-identical gs command to the Go tool); Phases 2 (CLI)
+  & 3 (winspool.drv FFI) pending. The Go tool on `main` is unaffected.
