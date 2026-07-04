@@ -214,9 +214,38 @@ func listPrinters() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "pdfprint — print a PDF via Ghostscript+PPD (PCL/PS) to a Windows printer\n\n")
-	fmt.Fprintf(os.Stderr, "usage: pdfprint [flags] <input.pdf|->\n\n")
-	flag.PrintDefaults()
+	out := flag.CommandLine.Output()
+	fmt.Fprintf(out, "pdfprint — print a PDF via Ghostscript+PPD (PCL/PS) to a Windows printer\n\n")
+	fmt.Fprintf(out, "usage: pdfprint [flags] <input.pdf|->\n\n")
+	// Like flag.PrintDefaults, but renders multi-character (long) options with a
+	// double dash (--printer) — matching the docs and the flag descriptions —
+	// while single-letter options (-v, -q) keep the single dash. Both forms are
+	// accepted at runtime; this just keeps the help self-consistent.
+	flag.VisitAll(func(f *flag.Flag) {
+		dash := "--"
+		if len(f.Name) == 1 {
+			dash = "-"
+		}
+		name, help := flag.UnquoteUsage(f)
+		var b strings.Builder
+		fmt.Fprintf(&b, "  %s%s", dash, f.Name)
+		if name != "" {
+			b.WriteString(" " + name)
+		}
+		if b.Len() <= 4 { // short flag on the same line, like PrintDefaults
+			b.WriteString("\t")
+		} else {
+			b.WriteString("\n    \t")
+		}
+		b.WriteString(strings.ReplaceAll(help, "\n", "\n    \t"))
+		// Show the default only when it isn't the type's zero value.
+		switch f.DefValue {
+		case "", "false", "0":
+		default:
+			fmt.Fprintf(&b, " (default %s)", f.DefValue)
+		}
+		fmt.Fprintln(out, b.String())
+	})
 }
 
 func fatal(err error) {
