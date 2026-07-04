@@ -25,6 +25,29 @@ type Caps struct {
 	MediaReady     []string // media currently loaded in the trays (IPP media-ready)
 	MediaDefault   string   // default media
 	MediaSupported []string // all media sizes the printer accepts
+	Trays          []Tray   // input trays and the paper loaded in each (IPP media-col-ready / SNMP prtInputTable)
+}
+
+// Tray is one input source and the media currently loaded in it. Fields are
+// empty when the printer didn't report them (e.g. Size is "" for an empty or
+// unreported tray; Type is IPP-only).
+type Tray struct {
+	Source string // media-source (IPP) or prtInputDescription (SNMP), e.g. "tray-1", "Tray 1", "manual"
+	Size   string // loaded paper as a friendly label, e.g. "Letter", "A4", or "216x279mm"
+	Type   string // media-type, e.g. "stationery" (IPP only; empty via SNMP)
+}
+
+// Desc renders a tray as one human line: "Tray 2: Letter (stationery)".
+func (t Tray) Desc() string {
+	size := t.Size
+	if size == "" {
+		size = "empty / not reported"
+	}
+	s := fmt.Sprintf("%s: %s", prettySource(t.Source), size)
+	if t.Type != "" {
+		s += " (" + t.Type + ")"
+	}
+	return s
 }
 
 // Probe asks the printer at host for its capabilities, IPP then SNMP. Returns an
@@ -152,4 +175,69 @@ func (c *Caps) Summary() string {
 		parts = append(parts, "loaded: "+strings.Join(c.MediaReady, ", "))
 	}
 	return fmt.Sprintf("%s (via %s)", strings.Join(parts, "; "), c.Source)
+}
+
+// prettySource turns a PWG media-source keyword into a readable label:
+// "tray-1" -> "Tray 1", "main" -> "Main". SNMP descriptions ("Tray 1") pass
+// through unchanged. An empty source becomes "(tray)".
+func prettySource(s string) string {
+	if s == "" {
+		return "(tray)"
+	}
+	words := strings.Fields(strings.ReplaceAll(s, "-", " "))
+	for i, w := range words {
+		words[i] = strings.ToUpper(w[:1]) + w[1:]
+	}
+	return strings.Join(words, " ")
+}
+
+// dimsToLabel maps an IPP media-size (x,y in hundredths of a millimetre) to a
+// friendly size name, or falls back to "WxHmm" when it matches nothing known.
+func dimsToLabel(xHmm, yHmm int) string {
+	known := []struct {
+		name string
+		w, h int
+	}{
+		{"Letter", 21590, 27940}, {"Legal", 21590, 35560},
+		{"Tabloid", 27940, 43180}, {"Executive", 18415, 26670},
+		{"Statement", 13970, 21590},
+		{"A5", 14800, 21000}, {"A4", 21000, 29700}, {"A3", 29700, 42000},
+	}
+	lo, hi := xHmm, yHmm
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	near := func(a, b int) bool { d := a - b; return d <= 40 && d >= -40 } // ±0.4 mm
+	for _, k := range known {
+		if near(lo, k.w) && near(hi, k.h) {
+			return k.name
+		}
+	}
+	return fmt.Sprintf("%gx%gmm", float64(xHmm)/100, float64(yHmm)/100)
+}
+
+// normalizeMediaName maps a free-form SNMP prtInputMediaName ("na-letter",
+// "iso A4", "Letter") to the same friendly labels dimsToLabel uses; otherwise
+// it returns the trimmed original.
+func normalizeMediaName(s string) string {
+	s = strings.TrimSpace(s)
+	switch l := strings.ToLower(s); {
+	case strings.Contains(l, "letter"):
+		return "Letter"
+	case strings.Contains(l, "legal"):
+		return "Legal"
+	case strings.Contains(l, "tabloid"), strings.Contains(l, "ledger"):
+		return "Tabloid"
+	case strings.Contains(l, "executive"):
+		return "Executive"
+	case strings.Contains(l, "statement"):
+		return "Statement"
+	case strings.Contains(l, "a4"):
+		return "A4"
+	case strings.Contains(l, "a3"):
+		return "A3"
+	case strings.Contains(l, "a5"):
+		return "A5"
+	}
+	return s
 }

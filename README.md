@@ -119,6 +119,11 @@ Windows is missing.
 - `--host <ip[:port]>` (with `--port`, default 9100) — skip the installed queues
   entirely and dial a network printer directly over raw TCP. Works on any OS.
 - `--list-printers` — print the exact installed names and exit.
+- `--list-trays` — list every installed printer with its input trays and the
+  paper loaded in each, then exit. Tray/loaded-media state lives on the device,
+  so this **queries each printer over the network** (IPP, then SNMP) with a short
+  timeout, skipping printers with no reachable IP (USB/local) or that don't
+  answer. Use `--probe` (below) to inspect a single printer's trays.
 
 ### Devices & auto-detection
 
@@ -146,13 +151,22 @@ reports what it detected and what it chose. If it **can't** detect (the printer 
 unreachable, or you're writing to a file), it **refuses rather than guess** —  you must pass
 `--device`. 
 
-To inspect detection without printing:
+To inspect detection without printing — including the **input trays and the
+paper loaded in each** (parsed from IPP `media-col-ready`, or the SNMP Printer-MIB
+`prtInputTable` as a fallback):
 
 ```bat
 pdfprint --probe --printer "<name>"
 :: <model>; languages: PCL, PostScript, PDF, ...; color; duplex (via IPP)
+:: media (supported): na_letter_8.5x11in, na_legal_8.5x14in, ...
+:: trays:
+::   Tray 1: empty / not reported
+::   Tray 2: Letter (stationery)
+::   Tray 3: Legal
 :: suggested: --device pxlcolor (PCL-XL, color)
 ```
+
+(For all printers at once, use `--list-trays`.)
 
 Resolution order: explicit `--device` → the PPD's device → probe the printer →
 error. A PPD's device is inferred from its Foomatic command line, then

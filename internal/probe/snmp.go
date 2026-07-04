@@ -3,6 +3,8 @@ package probe
 import (
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -12,6 +14,8 @@ import (
 var (
 	oidSysDescr        = []int{1, 3, 6, 1, 2, 1, 1, 1, 0}         // sysDescr.0
 	oidInterpreterDesc = []int{1, 3, 6, 1, 2, 1, 43, 15, 1, 1, 5} // prtInterpreterLangDescription
+	oidPrtInputDesc    = []int{1, 3, 6, 1, 2, 1, 43, 8, 2, 1, 18} // prtInputDescription (tray name)
+	oidPrtInputMedia   = []int{1, 3, 6, 1, 2, 1, 43, 8, 2, 1, 12} // prtInputMediaName (loaded media)
 )
 
 var snmpReqID = 0
@@ -44,10 +48,64 @@ func probeSNMP(host string, timeout time.Duration) (*Caps, error) {
 		cur = oid
 	}
 
+	caps.Trays = snmpTrays(conn)
+
 	if caps.Model == "" && len(caps.Languages) == 0 {
 		return nil, fmt.Errorf("no SNMP data")
 	}
 	return caps, nil
+}
+
+// snmpTrays walks the Printer-MIB prtInputTable, correlating each tray's
+// description and loaded-media columns by their shared row index.
+func snmpTrays(conn net.Conn) []Tray {
+	byRow := map[string]*Tray{}
+	var order []string
+
+	walk := func(base []int, set func(t *Tray, val string)) {
+		cur := base
+		for i := 0; i < 32; i++ {
+			oid, val, tag, ok := snmpGetNext(conn, cur)
+			if !ok || !hasPrefix(oid, base) {
+				break
+			}
+			cur = oid
+			if tag != 0x04 { // OCTET STRING
+				continue
+			}
+			row := oidTail(oid, len(base))
+			t := byRow[row]
+			if t == nil {
+				t = &Tray{}
+				byRow[row] = t
+				order = append(order, row)
+			}
+			set(t, string(val))
+		}
+	}
+
+	walk(oidPrtInputDesc, func(t *Tray, v string) { t.Source = strings.TrimSpace(v) })
+	walk(oidPrtInputMedia, func(t *Tray, v string) { t.Size = normalizeMediaName(v) })
+
+	var out []Tray
+	for _, row := range order {
+		t := byRow[row]
+		if t.Source == "" && t.Size == "" {
+			continue
+		}
+		out = append(out, *t)
+	}
+	return out
+}
+
+// oidTail joins the index sub-identifiers that follow a table column's base OID
+// into a stable row key (e.g. "1.2").
+func oidTail(oid []int, prefixLen int) string {
+	parts := make([]string, 0, len(oid)-prefixLen)
+	for _, n := range oid[prefixLen:] {
+		parts = append(parts, strconv.Itoa(n))
+	}
+	return strings.Join(parts, ".")
 }
 
 // snmpGetNext sends a GetNextRequest for oid and returns the next (oid, value).

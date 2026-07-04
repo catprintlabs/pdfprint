@@ -27,9 +27,15 @@ const (
 	tagURI         = 0x45
 	tagKeyword     = 0x44
 	tagBoolean     = 0x22
+	tagInteger     = 0x21
 	tagMimeType    = 0x49
 	tagTextNoLang  = 0x41
 	tagNameNoLang  = 0x42
+
+	// Collection (media-col-ready) encoding, RFC 8010 §3.1.6.
+	tagBegCollection = 0x34
+	tagEndCollection = 0x37
+	tagMemberName    = 0x4A
 )
 
 // probeIPP asks the printer over IPP (TCP 631). It tries the common resource
@@ -97,6 +103,8 @@ func buildGetPrinterAttrs(uri string) []byte {
 	writeAttr(&b, tagKeyword, "", "media-ready")
 	writeAttr(&b, tagKeyword, "", "media-default")
 	writeAttr(&b, tagKeyword, "", "media-supported")
+	writeAttr(&b, tagKeyword, "", "media-col-ready")        // per-tray loaded media (source + size)
+	writeAttr(&b, tagKeyword, "", "media-source-supported") // the full tray list
 
 	b.WriteByte(tagEndAttrs)
 	return b.Bytes()
@@ -119,6 +127,7 @@ func parseIPP(raw []byte) (*Caps, error) {
 
 	caps := &Caps{Source: "IPP"}
 	var curName string
+	var sourceSupported []string
 	for len(p) > 0 {
 		tag := p[0]
 		p = p[1:]
@@ -137,11 +146,141 @@ func parseIPP(raw []byte) (*Caps, error) {
 		if len(name) > 0 {
 			curName = string(name)
 		}
+
+		// media-col-ready is a 1setOf collection: each value describes one tray.
+		if tag == tagBegCollection {
+			members, r, cok := parseCollection(p)
+			if !cok {
+				break
+			}
+			p = r
+			if curName == "media-col-ready" {
+				if t, ok := trayFromMembers(members); ok {
+					caps.Trays = append(caps.Trays, t)
+				}
+			}
+			continue
+		}
+		if curName == "media-source-supported" && tag == tagKeyword {
+			sourceSupported = append(sourceSupported, string(value))
+			continue
+		}
 		applyIPPAttr(caps, curName, tag, value)
 	}
 
+	mergeSources(caps, sourceSupported)
 	deriveLanguages(caps)
 	return caps, nil
+}
+
+// ippMember is one member of an IPP collection: a scalar (tag+val) or, when it
+// is itself a collection (media-size), a nested member map in sub.
+type ippMember struct {
+	tag byte
+	val []byte
+	sub map[string]ippMember
+}
+
+// parseCollection reads member-attributes until the matching endCollection,
+// starting just after a begCollection value. Nested collections recurse. It
+// returns the members, the remaining bytes, and ok=false on malformed input.
+func parseCollection(p []byte) (members map[string]ippMember, rest []byte, ok bool) {
+	members = map[string]ippMember{}
+	for len(p) > 0 {
+		tag := p[0]
+		p = p[1:]
+		if tag == tagEndCollection {
+			_, _, r, k := readValue(p) // consumes the empty name+value
+			if !k {
+				return members, p, false
+			}
+			return members, r, true
+		}
+		if tag != tagMemberName {
+			return members, p, false
+		}
+		_, nameVal, r, k := readValue(p)
+		if !k {
+			return members, p, false
+		}
+		p = r
+		member := string(nameVal)
+		if len(p) < 1 {
+			return members, p, false
+		}
+		vtag := p[0]
+		p = p[1:]
+		if vtag == tagBegCollection {
+			_, _, r2, k2 := readValue(p) // empty begCollection value
+			if !k2 {
+				return members, p, false
+			}
+			sub, r3, k3 := parseCollection(r2)
+			if !k3 {
+				return members, r3, false
+			}
+			members[member] = ippMember{tag: vtag, sub: sub}
+			p = r3
+			continue
+		}
+		_, val, r2, k2 := readValue(p)
+		if !k2 {
+			return members, p, false
+		}
+		members[member] = ippMember{tag: vtag, val: val}
+		p = r2
+	}
+	return members, p, false
+}
+
+// trayFromMembers builds a Tray from one media-col-ready collection. ok is false
+// when it carries neither a source nor a size worth reporting.
+func trayFromMembers(m map[string]ippMember) (Tray, bool) {
+	var t Tray
+	if src, ok := m["media-source"]; ok {
+		t.Source = string(src.val)
+	}
+	if typ, ok := m["media-type"]; ok {
+		t.Type = string(typ.val)
+	}
+	if sz, ok := m["media-size"]; ok && sz.sub != nil {
+		x := ippInt(sz.sub["x-dimension"])
+		y := ippInt(sz.sub["y-dimension"])
+		if x > 0 && y > 0 {
+			t.Size = dimsToLabel(x, y)
+		}
+	}
+	if t.Source == "" && t.Size == "" {
+		return t, false
+	}
+	return t, true
+}
+
+// ippInt decodes a big-endian IPP integer value.
+func ippInt(m ippMember) int {
+	n := 0
+	for _, b := range m.val {
+		n = n<<8 | int(b)
+	}
+	return n
+}
+
+// mergeSources appends any advertised tray (media-source-supported) that had no
+// ready-media collection, so empty trays still appear in the list.
+func mergeSources(caps *Caps, sources []string) {
+	have := map[string]bool{}
+	for _, t := range caps.Trays {
+		have[strings.ToLower(t.Source)] = true
+	}
+	for _, s := range sources {
+		if s == "" || strings.EqualFold(s, "auto") {
+			continue
+		}
+		if !have[strings.ToLower(s)] {
+			caps.Trays = append(caps.Trays, Tray{Source: s})
+			have[strings.ToLower(s)] = true
+		}
+	}
 }
 
 // readValue reads one name-length/name/value-length/value triple.

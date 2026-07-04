@@ -154,6 +154,27 @@ pxlcolor" stopgap).
   physical step). The warning bypasses `--quiet` (it affects the physical output).
   `probe.MediaLoaded` compares within ~5pt, orientation-independent.
 
+## Trays & loaded paper (per-tray reporting, added 2026-07-04)
+`Caps.Trays []Tray{Source,Size,Type}` reports each input tray and the paper in it.
+Two device-side sources (a user asked for this; only the printer knows it):
+- **IPP** `media-col-ready` — a *collection* attribute (nested: `media-size`→
+  `x/y-dimension` in **hundredths of a mm**, plus `media-source`/`media-type`).
+  Required a real IPP collection parser (`parseCollection` in `ipp.go`, tags
+  begCollection 0x34 / endCollection 0x37 / memberName 0x4A). `media-source-
+  supported` fills in advertised-but-empty trays. `dimsToLabel` maps dims → size
+  name (Letter/Legal/A4…), else `WxHmm`.
+- **SNMP** fallback — walks Printer-MIB `prtInputTable`: `prtInputDescription`
+  (.43.8.2.1.18) + `prtInputMediaName` (.12), joined by row index (`snmpTrays`).
+- **Surfaced two ways:** `--probe` prints a `trays:` block for one printer;
+  **`--list-trays`** lists all printers with their trays. `--list-trays` probes
+  each over the network (3s timeout), skips USB/local/unreachable — deliberately
+  NOT folded into the fast, local `--list-printers`, and NOT gated behind `-v`
+  (which means "verbose logging", not "do network I/O"). Chose `--list-trays`
+  over `--list-printers -v` / `--list-printers-verbose` for exactly that reason.
+- Parser is unit-tested with synthetic IPP bytes (`TestParseIPPTrays`,
+  `TestDimsToLabel`). **Not yet validated against a real printer** — the C620 LAN
+  wasn't reachable from the Mac; confirm on Windows with `--probe --printer`.
+
 ## Verbosity
 `--quiet`/`-q` (errors only) · normal (progress + detection summary) · `-v`
 (adds gs command, gs path, PPD, probe detail). `--dry-run` shows the resolved
@@ -226,6 +247,10 @@ installed standalone. Decisions made 2026-07-02:
 - ✅ Windows real-printer verification (done — see "Verified so far / Windows").
 - ✅ `make print-test` + `scripts/smoke-test.ps1` convenience targets (done).
 - ✅ Transport auto-routing (WSD/V4 → raw TCP) with IP discovery (done).
+- ⏳ Per-tray / loaded-paper reporting (`--probe` trays block + `--list-trays`,
+  added 2026-07-04; see "Trays & loaded paper"). Parser unit-tested; **needs a
+  real-printer check on Windows** — verify `--probe --printer "<name>"` shows a
+  sane `trays:` block, and `--list-trays` sweeps the fleet.
 - PII-free dummy imposition ticket fixture (still pending — the color/raster path
   was verified once on a real ticket that was removed for PII).
 - Longer-term (see `docs/DESIGN.md` "Not yet done"): full Foomatic option

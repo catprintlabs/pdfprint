@@ -50,6 +50,7 @@ func main() {
 		colorFlag  = flag.String("color", "auto", "color mode: auto | color | mono")
 		gsBinary   = flag.String("gs", "", "path to the Ghostscript binary (auto-detected if empty)")
 		listPrn    = flag.Bool("list-printers", false, "list installed Windows printers and exit")
+		listTrays  = flag.Bool("list-trays", false, "list installed printers with their input trays and loaded paper, then exit (queries each printer over the network; skips offline/USB)")
 		probeFlag  = flag.Bool("probe", false, "query the printer's capabilities (needs --host or --printer) and exit")
 		dryRun     = flag.Bool("dry-run", false, "print the resolved Ghostscript command + transport and exit")
 		verbose    = flag.Bool("v", false, "verbose logging (gs command, PPD, probe detail)")
@@ -61,6 +62,11 @@ func main() {
 
 	if *listPrn {
 		listPrinters()
+		return
+	}
+
+	if *listTrays {
+		listTraysCmd()
 		return
 	}
 
@@ -191,6 +197,12 @@ func runProbe(host, printer string, port int) {
 	if len(caps.MediaSupported) > 0 {
 		fmt.Println("media (supported):", strings.Join(caps.MediaSupported, ", "))
 	}
+	if len(caps.Trays) > 0 {
+		fmt.Println("trays:")
+		for _, t := range caps.Trays {
+			fmt.Println("  " + t.Desc())
+		}
+	}
 	if dev, reason, ok := caps.SuggestDevice(nil); ok {
 		fmt.Printf("suggested: --device %s (%s)\n", dev, reason)
 	} else {
@@ -210,6 +222,49 @@ func listPrinters() {
 	}
 	for _, n := range names {
 		fmt.Println(n)
+	}
+}
+
+// listTraysCmd lists every installed printer with its input trays and the paper
+// loaded in each. Tray/media state lives on the device, so it probes each one
+// over the network (IPP/SNMP) with a short timeout, skipping printers that have
+// no reachable IP (USB/local) or don't answer.
+func listTraysCmd() {
+	names, err := spool.ListPrinters()
+	if err != nil {
+		fatal(err)
+	}
+	if len(names) == 0 {
+		fmt.Fprintln(os.Stderr, "no printers found")
+		return
+	}
+	for _, name := range names {
+		fmt.Println(name)
+		route, err := spool.ResolvePrinter(name)
+		if err != nil || route.Kind != "socket" || route.Addr == "" {
+			why := "no network address (USB/local or undiscoverable)"
+			if err == nil && route.Why != "" {
+				why = route.Why
+			}
+			fmt.Printf("  (skipped: %s)\n", why)
+			continue
+		}
+		ip := route.Addr
+		if h, _, err := net.SplitHostPort(ip); err == nil {
+			ip = h
+		}
+		caps, err := probe.Probe(ip, 3*time.Second)
+		if err != nil {
+			fmt.Printf("  (no response from %s)\n", ip)
+			continue
+		}
+		if len(caps.Trays) == 0 {
+			fmt.Println("  (printer reported no tray information)")
+			continue
+		}
+		for _, t := range caps.Trays {
+			fmt.Println("  " + t.Desc())
+		}
 	}
 }
 
