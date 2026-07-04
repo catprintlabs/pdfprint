@@ -268,8 +268,15 @@ installed standalone. Decisions made 2026-07-02:
   on Windows.
 - PII-free dummy imposition ticket fixture (still pending — the color/raster path
   was verified once on a real ticket that was removed for PII).
+- ⛔ Input-tray **selection** (`--tray`): investigated 2026-07-04 and **shelved**.
+  gs devices (`ps2write`/`pxlmono`/`pxlcolor`/`ljet4`) accept `/MediaPosition` etc.
+  in setpagedevice but **emit byte-identical output** — they don't put a tray
+  command in the stream. Real fix = inject into the stream (PS `setpagedevice`
+  prologue / PCL5 `Esc&l#H` / PCL-XL `@PJL SET MEDIASOURCE=`, the last is
+  printer-specific). Deferred until the C620 is reachable to validate PCL-XL. See
+  `docs/DESIGN.md` § 8e. (Tray *reporting* is done and unaffected.)
 - Longer-term (see `docs/DESIGN.md` "Not yet done"): full Foomatic option
-  substitution, auto-locating a printer's PPD, UIConstraints, tray selection, N-up.
+  substitution, auto-locating a printer's PPD, UIConstraints, N-up.
 - Possible polish: LPR (515) fallback if a device has 9100 closed; IPv6 hosts in
   discovery; a `--transport` value to prefer spooler-over-socket for TCP/IP queues.
 

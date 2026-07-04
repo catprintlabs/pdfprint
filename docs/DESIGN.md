@@ -119,7 +119,9 @@ On the Mac, end-to-end, real output — not mocks:
   standard `setpagedevice`, not the PPD's per-option PostScript snippets.
 - Enumerating installed Windows printers / auto-locating the driver's PPD.
 - `*UIConstraints` (rejecting incompatible option combos).
-- Media source / input-tray selection.
+- Media source / input-tray *selection* (`--tray`) — investigated and shelved;
+  gs won't emit it, needs printer-specific stream injection. See § 8e. (Tray
+  *reporting* via `--probe`/`--list-trays` is done.)
 - N-up, scaling, page ranges (the `pdftopdf` pre-filter stage).
 
 ## 8a. "No scaling" and exact media (added for real-printer testing)
@@ -234,6 +236,37 @@ Two smaller companions landed with it:
   identifies one installed printer (exact match wins); ambiguous or absent
   matches error with the candidates. So `--printer "(FC:82:A2)"` selects one of
   five identically-named C620s.
+
+## 8e. Input-tray selection — why gs can't do it (investigated 2026-07-04)
+
+After adding tray *reporting* (§ `--probe`/`--list-trays`), the obvious next step
+was tray *selection* (`--tray`). The tempting implementation — pass `/MediaPosition`
+(or `/ManualFeed`, `/MediaType`) in the same `setpagedevice` prologue that already
+carries duplex/copies — was built and then **measured: it is a no-op.**
+
+Ghostscript's output devices *accept* those page-device keys (they appear in
+`currentpagedevice`: `MediaPosition`, `InputAttributes`, `ManualFeed`, `MediaType`)
+but **do not translate them into the emitted stream.** With `ps2write`,
+`pxlmono`/`pxlcolor`, and `ljet4`, the output was **byte-identical** (same MD5)
+for tray 1 vs tray 2 vs manual — including when calling gs directly, bypassing
+this tool. So gs renders the page but never emits a tray-selection command.
+
+**The correct mechanism is stream injection** — the command must reach the
+*printer's* interpreter, exactly how CUPS injects a PPD `*InputSlot` snippet into
+the job:
+- **PostScript (`ps2write`)**: prepend `<< /MediaPosition n >> setpagedevice` (or
+  `/ManualFeed true`, `/MediaType (…)`) to the stream. Standard; the CUPS way.
+- **PCL5 (`ljet4`)**: inject the `Esc&l#H` media-source escape (1=main, 2=manual,
+  4=lower, 5=high-capacity…). Fairly standardized.
+- **PCL-XL (`pxlcolor`/`pxlmono`)**: inject `@PJL SET MEDIASOURCE=<value>` into the
+  PJL header — but the values are **printer-specific**, so this needs validation
+  against the real device (the Xerox C620 speaks PCL-XL and was unavailable).
+
+**Decision (Mitch, 2026-07-04): shelve it, document the finding.** Not worth
+shipping printer-specific, unvalidated stream injection blind. Revisit when the
+C620 is reachable to test the PCL-XL/PJL path (PostScript can be validated any
+time by inspecting the emitted `.ps`). The `--tray` flag plumbing was reverted so
+the tree carries no dead option. Note: tray *reporting* is unaffected and stays.
 
 ## 9. How to pick up from here
 
