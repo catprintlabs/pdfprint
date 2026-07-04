@@ -172,8 +172,22 @@ Two device-side sources (a user asked for this; only the printer knows it):
   (which means "verbose logging", not "do network I/O"). Chose `--list-trays`
   over `--list-printers -v` / `--list-printers-verbose` for exactly that reason.
 - Parser is unit-tested with synthetic IPP bytes (`TestParseIPPTrays`,
-  `TestDimsToLabel`). **Not yet validated against a real printer** — the C620 LAN
-  wasn't reachable from the Mac; confirm on Windows with `--probe --printer`.
+  `TestDimsToLabel`, `TestPrettySource`).
+- **Real-printer check (2026-07-04, partial ✅):** validated over IPP against a
+  live **Brother HL-3170CDW** (home LAN, `--probe --host <ip>`). It parsed the
+  real IPP response cleanly and reported **two trays** — `Manual` and `Tray 1`
+  (from `media-source-supported`; IPP found the manual feeder that SNMP's
+  `prtInputTable` missed — SNMP showed only `TRAY1`). Both sizes came back
+  "empty / not reported" because this printer genuinely doesn't report loaded
+  media (SNMP `prtInputMediaName` = "Unknown"). Also a real finding: the
+  HL-3170CDW advertises **only Apple/PWG Raster over IPP — no PCL/PS** — so the
+  probe correctly hit "no targetable device" (refuse-rather-than-guess worked).
+- **Still to verify:** (a) an actual **loaded-size label** populated from
+  `media-col-ready` (needs a printer that reports it — the **Xerox C620** is the
+  target, was asleep during the check); (b) the **SNMP tray path end-to-end**
+  (IPP answered first on the Brother, so `snmpTrays` wasn't exercised live —
+  though `snmpwalk` confirmed the exact OIDs return the expected rows);
+  (c) `--list-trays` on Windows (macOS is IPP `--host` only).
 
 ## Verbosity
 `--quiet`/`-q` (errors only) · normal (progress + detection summary) · `-v`
@@ -248,9 +262,10 @@ installed standalone. Decisions made 2026-07-02:
 - ✅ `make print-test` + `scripts/smoke-test.ps1` convenience targets (done).
 - ✅ Transport auto-routing (WSD/V4 → raw TCP) with IP discovery (done).
 - ⏳ Per-tray / loaded-paper reporting (`--probe` trays block + `--list-trays`,
-  added 2026-07-04; see "Trays & loaded paper"). Parser unit-tested; **needs a
-  real-printer check on Windows** — verify `--probe --printer "<name>"` shows a
-  sane `trays:` block, and `--list-trays` sweeps the fleet.
+  added 2026-07-04; see "Trays & loaded paper"). **IPP tray parsing validated on a
+  real Brother HL-3170CDW** (2026-07-04). Remaining: a printer that reports a
+  loaded *size* (Xerox C620), the SNMP tray path end-to-end, and `--list-trays`
+  on Windows.
 - PII-free dummy imposition ticket fixture (still pending — the color/raster path
   was verified once on a real ticket that was removed for PII).
 - Longer-term (see `docs/DESIGN.md` "Not yet done"): full Foomatic option
